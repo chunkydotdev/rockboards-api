@@ -45,6 +45,8 @@ RUN pnpm install --prod --frozen-lockfile
 # Copy built application with proper ownership
 COPY --from=build --chown=apiservice:nodejs /app/dist ./dist
 
+COPY .env .env
+
 # Switch to non-root user
 USER apiservice
 
