@@ -1,12 +1,14 @@
 import cors from "cors";
 import express from "express";
 import { validateEnvironment } from "./lib/env-validation";
+import alternativeAssetPricesRouter from "./routes/alternative-asset-prices";
+import alternativeAssetsRouter from "./routes/alternative-assets";
 import companiesRouter from "./routes/companies";
 import companyMetricsRouter from "./routes/company-metrics";
 import eventsRouter from "./routes/events";
 import moonshotInvestmentsRouter from "./routes/moonshot-investments";
-import moonshotTransactionsRouter from "./routes/moonshot-transactions";
 import moonshotRealtimePricesRouter from "./routes/moonshot-realtime-prices";
+import moonshotTransactionsRouter from "./routes/moonshot-transactions";
 import optionsRouter from "./routes/options";
 import realtimeOptionsRouter from "./routes/realtime-options";
 import realtimeStockPricesRouter from "./routes/realtime-stock-prices";
@@ -71,6 +73,8 @@ app.use("/api/events", eventsRouter);
 app.use("/api/moonshot-investments", moonshotInvestmentsRouter);
 app.use("/api/moonshot-transactions", moonshotTransactionsRouter);
 app.use("/api/moonshot-realtime-prices", moonshotRealtimePricesRouter);
+app.use("/api/alternative-assets", alternativeAssetsRouter);
+app.use("/api/alternative-asset-prices", alternativeAssetPricesRouter);
 app.use("/api/options/realtime", realtimeOptionsRouter);
 app.use("/api/options", optionsRouter);
 

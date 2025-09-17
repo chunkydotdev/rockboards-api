@@ -227,7 +227,7 @@ export interface MoonshotInvestment {
 	status: "active" | "sold" | "partial_sale";
 	created_at: string;
 	updated_at: string;
-	
+
 	// Calculated fields (for UI)
 	shares_sold?: number; // shares_purchased - shares_remaining
 	remaining_cost_basis?: number; // (shares_remaining / shares_purchased) * total_cost
@@ -257,3 +257,80 @@ export interface MoonshotTransaction {
 	notes?: string;
 	created_at: string;
 }
+
+// Alternative Assets - Extended and unified asset tracking system
+export interface AlternativeAsset {
+	id: string;
+	company_id: string;
+
+	// Asset identification
+	asset_type:
+		| "equity"
+		| "commodity"
+		| "real_estate"
+		| "crypto"
+		| "bond"
+		| "other";
+	asset_category:
+		| "moonshot"
+		| "strategic"
+		| "hedge"
+		| "diversification"
+		| "other";
+	ticker?: string; // For publicly traded assets
+	asset_name: string;
+
+	// Investment details (from moonshot schema)
+	purchase_date: string;
+	shares_purchased: number;
+	shares_remaining: number; // Current shares held (after any sales)
+	purchase_price_per_share: number;
+	total_cost: number; // Original total cost of shares_purchased
+	investment_thesis?: string;
+	status: "active" | "sold" | "partial_sale";
+	created_at: string;
+	updated_at: string;
+
+	// Calculated fields (for UI)
+	company_name?: string; // From companies table join
+	shares_sold?: number; // shares_purchased - shares_remaining
+	remaining_cost_basis?: number; // (shares_remaining / shares_purchased) * total_cost
+	current_price?: number; // From realtime_stock_prices table
+	current_value?: number; // shares_remaining * current_price
+	unrealized_gain_loss?: number; // current_value - remaining_cost_basis
+	unrealized_gain_loss_percent?: number;
+
+	// Optional relations
+	transactions?: AlternativeAssetTransaction[];
+	price_history?: StockPrice[]; // Uses existing stock_prices table
+}
+
+export interface AlternativeAssetsPortfolio {
+	totalAssets: number;
+	totalCostBasis: number;
+	totalCurrentValue: number;
+	totalUnrealizedGainLoss: number;
+	totalUnrealizedGainLossPercent: number;
+	assets: AlternativeAsset[];
+	allocationPercentOfTreasury: number;
+
+	// Groupings
+	assetsByCategory: Record<string, AlternativeAsset[]>;
+	assetsByType: Record<string, AlternativeAsset[]>;
+}
+
+export interface AlternativeAssetTransaction {
+	id: string;
+	asset_id: string;
+	transaction_type: "buy" | "sell";
+	transaction_date: string;
+	shares: number;
+	price_per_share: number;
+	total_amount: number;
+	fees?: number;
+	notes?: string;
+	created_at: string;
+}
+
+// Note: Alternative asset prices are stored in the existing stock_prices table
+// linked via company_id. This reuses the existing infrastructure.
