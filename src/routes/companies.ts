@@ -1,30 +1,40 @@
 import { type Request, type Response, Router } from "express";
+import {
+	CacheDuration,
+	EndpointCache,
+	createCacheManagementRoutes,
+	createCacheMiddleware,
+} from "../lib/cache";
 import { handleDbError, supabase } from "../lib/supabase";
 import type { ApiResponse, Company, CompanyWithData } from "../types";
 
 const router: Router = Router();
 
-// GET /api/companies - Get all companies
-router.get("/", async (req: Request, res: Response) => {
-	try {
-		const { data: companies, error } = await supabase
-			.from("companies")
-			.select("*")
-			.order("name");
-
-		if (error) {
-			return res.status(500).json(handleDbError(error));
-		}
-
-		const response: ApiResponse<Company[]> = {
-			data: companies || [],
-		};
-
-		res.json(response);
-	} catch (error) {
-		res.status(500).json(handleDbError(error));
-	}
+// Create cache instance for companies with 1 hour TTL
+const companiesCache = new EndpointCache<Company[]>({
+	ttlMs: CacheDuration.HOUR,
+	keyPrefix: "companies",
 });
+
+// Data fetcher function for companies
+async function fetchCompanies(): Promise<Company[]> {
+	const { data: companies, error } = await supabase
+		.from("companies")
+		.select("*")
+		.order("name");
+
+	if (error) {
+		throw error;
+	}
+
+	return companies || [];
+}
+
+// Cache management routes
+const cacheManagement = createCacheManagementRoutes(companiesCache);
+
+// GET /api/companies - Get all companies (with 1-hour caching)
+router.get("/", createCacheMiddleware(companiesCache, fetchCompanies));
 
 // GET /api/companies/ticker/:ticker - Get company by ticker with optional related data
 router.get("/ticker/:ticker", async (req: Request, res: Response) => {
@@ -90,5 +100,9 @@ router.get("/ticker/:ticker", async (req: Request, res: Response) => {
 		res.status(500).json(handleDbError(error));
 	}
 });
+
+// Cache management endpoints
+router.get("/cache/info", cacheManagement.info);
+router.delete("/cache/clear", cacheManagement.clear);
 
 export default router;
