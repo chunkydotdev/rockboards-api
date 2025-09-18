@@ -6,9 +6,6 @@ import alternativeAssetsRouter from "./routes/alternative-assets";
 import companiesRouter from "./routes/companies";
 import companyMetricsRouter from "./routes/company-metrics";
 import eventsRouter from "./routes/events";
-import moonshotInvestmentsRouter from "./routes/moonshot-investments";
-import moonshotRealtimePricesRouter from "./routes/moonshot-realtime-prices";
-import moonshotTransactionsRouter from "./routes/moonshot-transactions";
 import optionsRouter from "./routes/options";
 import realtimeOptionsRouter from "./routes/realtime-options";
 import realtimeStockPricesRouter from "./routes/realtime-stock-prices";
@@ -70,9 +67,6 @@ app.use("/api/stock-prices", stockPricesRouter);
 app.use("/api/companies", companiesRouter);
 app.use("/api/company-metrics", companyMetricsRouter);
 app.use("/api/events", eventsRouter);
-app.use("/api/moonshot-investments", moonshotInvestmentsRouter);
-app.use("/api/moonshot-transactions", moonshotTransactionsRouter);
-app.use("/api/moonshot-realtime-prices", moonshotRealtimePricesRouter);
 app.use("/api/alternative-assets", alternativeAssetsRouter);
 app.use("/api/alternative-asset-prices", alternativeAssetPricesRouter);
 app.use("/api/options/realtime", realtimeOptionsRouter);
@@ -86,14 +80,12 @@ app.get("/", (req, res) => {
 			"/health",
 			"/api/stock-prices",
 			"/api/stock-prices/realtime/:ticker",
+			"/api/stock-prices/realtime/cached/:ticker",
 			"/api/stock-prices/realtime/update",
 			"/api/companies",
 			"/api/companies/ticker/:ticker",
 			"/api/company-metrics",
 			"/api/events",
-			"/api/moonshot-investments",
-			"/api/moonshot-transactions",
-			"/api/moonshot-realtime-prices/:ticker",
 			"/api/alternative-assets",
 			"/api/alternative-asset-prices",
 			"/api/options",
