@@ -1,9 +1,176 @@
 import { type Request, type Response, Router } from "express";
 import yahooFinance from "yahoo-finance2";
-import { handleDbError, supabase } from "../lib/supabase";
+import { handleDbError, supabase, supabaseServiceRole } from "../lib/supabase";
 import type { ApiResponse, RealtimeStockPrice } from "../types";
 
+// Extended type for Yahoo Finance quote response
+interface YahooQuoteResponse {
+	regularMarketPrice?: number;
+	currency?: string;
+	regularMarketChange?: number;
+	regularMarketChangePercent?: number;
+	regularMarketTime?: number;
+	regularMarketPreviousClose?: number;
+	regularMarketOpen?: number;
+	regularMarketDayLow?: number;
+	regularMarketDayHigh?: number;
+	regularMarketVolume?: number;
+	marketState?: string;
+	exchange?: string;
+	fullExchangeName?: string;
+	displayName?: string;
+	longName?: string;
+	preMarketPrice?: number;
+	preMarketChange?: number;
+	preMarketChangePercent?: number;
+	preMarketTime?: number;
+	postMarketPrice?: number;
+	postMarketChange?: number;
+	postMarketChangePercent?: number;
+	postMarketTime?: number;
+}
+
 const router: Router = Router();
+
+// GET /api/stock-prices/realtime/update - Update realtime prices for all tickers (including alternative assets)
+router.get("/update", async (req: Request, res: Response) => {
+	try {
+		// Get all unique tickers from companies table
+		const { data: tickers } = await supabaseServiceRole
+			.from("companies")
+			.select("ticker")
+			.not("ticker", "is", null)
+			.not("ticker", "eq", "");
+
+		const results: Array<{
+			ticker: string;
+			success: boolean;
+			price?: number;
+			error?: string;
+		}> = [];
+
+		// Update prices for each ticker
+		for (const ticker of tickers?.map((t) => t.ticker) || []) {
+			try {
+				const yahooTicker =
+					ticker === "ETHUSD"
+						? "ETH-USD"
+						: ticker === "BTCUSD"
+							? "BTC-USD"
+							: ticker;
+
+				// Fetch from Yahoo Finance
+				const quote = (await yahooFinance.quote(
+					yahooTicker,
+				)) as YahooQuoteResponse;
+
+				if (!quote || !quote.regularMarketPrice) {
+					results.push({
+						ticker,
+						success: false,
+						error: "No price data available",
+					});
+					continue;
+				}
+
+				// Upsert realtime stock price using service role to bypass RLS
+				const { error: upsertError } = await supabaseServiceRole
+					.from("realtime_stock_prices")
+					.upsert(
+						{
+							ticker: ticker.toUpperCase(),
+							price: quote.regularMarketPrice,
+							currency: quote.currency || "USD",
+							regular_market_price: quote.regularMarketPrice,
+							regular_market_change: quote.regularMarketChange || 0,
+							regular_market_change_percent:
+								quote.regularMarketChangePercent || 0,
+							regular_market_time:
+								quote.regularMarketTime &&
+								typeof quote.regularMarketTime === "number"
+									? new Date(quote.regularMarketTime * 1000).toISOString()
+									: new Date().toISOString(),
+							regular_market_previous_close:
+								quote.regularMarketPreviousClose || 0,
+							regular_market_open: quote.regularMarketOpen || 0,
+							regular_market_day_low: quote.regularMarketDayLow || 0,
+							regular_market_day_high: quote.regularMarketDayHigh || 0,
+							regular_market_volume: quote.regularMarketVolume || 0,
+							market_state: quote.marketState || "UNKNOWN",
+							exchange_name: quote.exchange || "",
+							full_exchange_name: quote.fullExchangeName || "",
+							display_name: quote.displayName || ticker.toUpperCase(),
+							long_name: quote.longName || ticker.toUpperCase(),
+							pre_market_price: quote.preMarketPrice || 0,
+							pre_market_change: quote.preMarketChange || 0,
+							pre_market_change_percent: quote.preMarketChangePercent || 0,
+							pre_market_time:
+								quote.preMarketTime && typeof quote.preMarketTime === "number"
+									? new Date(quote.preMarketTime * 1000).toISOString()
+									: new Date().toISOString(),
+							post_market_price: quote.postMarketPrice || 0,
+							post_market_change: quote.postMarketChange || 0,
+							post_market_change_percent: quote.postMarketChangePercent || 0,
+							post_market_time:
+								quote.postMarketTime && typeof quote.postMarketTime === "number"
+									? new Date(quote.postMarketTime * 1000).toISOString()
+									: new Date().toISOString(),
+							last_updated: new Date().toISOString(),
+						},
+						{
+							onConflict: "ticker",
+						},
+					);
+
+				if (upsertError) {
+					results.push({
+						ticker,
+						success: false,
+						error: `Database update failed: ${upsertError.message}`,
+					});
+				} else {
+					results.push({
+						ticker,
+						success: true,
+						price: quote.regularMarketPrice,
+					});
+				}
+
+				// Add a small delay to avoid rate limiting
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			} catch (error) {
+				results.push({
+					ticker,
+					success: false,
+					error: error instanceof Error ? error.message : "Unknown error",
+				});
+			}
+		}
+
+		const successCount = results.filter((r) => r.success).length;
+		const failedResults = results.filter((r) => !r.success);
+
+		const response: ApiResponse<{
+			updated: number;
+			total: number;
+			results: typeof results;
+			failed: typeof failedResults;
+		}> = {
+			data: {
+				updated: successCount,
+				total: results.length,
+				results,
+				failed: failedResults,
+			},
+			message: `Updated ${successCount}/${results.length} realtime prices`,
+		};
+
+		res.json(response);
+	} catch (error) {
+		console.error("Error updating realtime prices:", error);
+		res.status(500).json(handleDbError(error));
+	}
+});
 
 // GET /api/stock-prices/realtime/:ticker - Real-time stock price for specific ticker
 router.get("/:ticker", async (req: Request, res: Response) => {
@@ -72,7 +239,9 @@ router.get("/:ticker", async (req: Request, res: Response) => {
 			};
 		} else {
 			// Fallback to Yahoo Finance if Supabase data is stale or missing
-			const quote = await yahooFinance.quote(ticker.toUpperCase());
+			const quote = (await yahooFinance.quote(
+				ticker.toUpperCase(),
+			)) as YahooQuoteResponse;
 
 			if (!quote) {
 				return res.status(404).json({

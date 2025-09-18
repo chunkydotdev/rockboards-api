@@ -3,7 +3,7 @@ import {
 	handleDbError,
 	supabaseServiceRole as supabase,
 } from "../lib/supabase";
-import type { ApiResponse } from "../types";
+import type { AlternativeAsset, ApiResponse } from "../types";
 
 const router: Router = Router();
 
@@ -22,7 +22,7 @@ router.get("/:assetId", async (req: Request, res: Response) => {
 
 		// Validate days parameter
 		const daysNum = Number.parseInt(days as string, 10);
-		if (isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
+		if (Number.isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
 			return res.status(400).json({
 				error: "Invalid days parameter",
 				message: "Days must be a number between 1 and 365",
@@ -84,7 +84,7 @@ router.get("/:assetId", async (req: Request, res: Response) => {
 // GET /api/alternative-asset-prices - Get latest prices for all assets or multiple asset IDs
 router.get("/", async (req: Request, res: Response) => {
 	try {
-		const { assetIds, latest = "true" } = req.query;
+		const { assetIds } = req.query;
 
 		// Get assets first
 		let assetQuery = supabase
@@ -115,7 +115,7 @@ router.get("/", async (req: Request, res: Response) => {
 		}
 
 		if (!assets || assets.length === 0) {
-			const response: ApiResponse<any[]> = {
+			const response: ApiResponse<AlternativeAsset[]> = {
 				data: [],
 				message: "No assets found",
 			};
@@ -190,7 +190,7 @@ router.get("/chart/:assetId", async (req: Request, res: Response) => {
 
 		// Validate parameters
 		const daysNum = Number.parseInt(days as string, 10);
-		if (isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
+		if (Number.isNaN(daysNum) || daysNum < 1 || daysNum > 365) {
 			return res.status(400).json({
 				error: "Invalid days parameter",
 				message: "Days must be a number between 1 and 365",

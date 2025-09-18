@@ -44,18 +44,23 @@ router.get("/", async (req: Request, res: Response) => {
 			return res.json(response);
 		}
 
-		// Get current prices from realtime_stock_prices table
-		const companyIds = assets.map((asset) => asset.company_id);
-		const { data: realtimePrices } = await supabase
-			.from("realtime_stock_prices")
-			.select("company_id, price")
-			.in("company_id", companyIds);
+		// Get current prices from realtime_stock_prices table by ticker
+		const tickers = assets.map((asset) => asset.ticker).filter(Boolean);
 
-		// Create price map for current prices (map by company_id)
-		const priceMap = new Map();
-		if (realtimePrices) {
-			for (const priceRecord of realtimePrices) {
-				priceMap.set(priceRecord.company_id, priceRecord.price);
+		// Get prices by ticker (this is the primary key for realtime_stock_prices)
+		const { data: realtimePricesByTicker } = await supabase
+			.from("realtime_stock_prices")
+			.select("ticker, price")
+			.in("ticker", tickers);
+
+		// Create price map for current prices (map by ticker)
+		const tickerPriceMap = new Map();
+
+		if (realtimePricesByTicker) {
+			for (const priceRecord of realtimePricesByTicker) {
+				if (priceRecord.ticker) {
+					tickerPriceMap.set(priceRecord.ticker, priceRecord.price);
+				}
 			}
 		}
 
@@ -66,8 +71,8 @@ router.get("/", async (req: Request, res: Response) => {
 		const assetsByType: Record<string, AlternativeAsset[]> = {};
 
 		const enrichedAssets: AlternativeAsset[] = assets.map((asset) => {
-			// Get current price from realtime_stock_prices
-			const currentPrice = priceMap.get(asset.company_id) || 0;
+			// Get current price from realtime_stock_prices by ticker
+			const currentPrice = tickerPriceMap.get(asset.ticker) || 0;
 			const currentValue = asset.shares_remaining * currentPrice;
 			const remainingCostBasis =
 				(asset.shares_remaining / asset.shares_purchased) * asset.total_cost;
