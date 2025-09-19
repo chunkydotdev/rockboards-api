@@ -1,12 +1,14 @@
 import cors from "cors";
 import express from "express";
 import { validateEnvironment } from "./lib/env-validation";
+import activityRouter from "./routes/activity";
 import alternativeAssetPricesRouter from "./routes/alternative-asset-prices";
 import alternativeAssetsRouter from "./routes/alternative-assets";
 import companiesRouter from "./routes/companies";
 import companyMetricsRouter from "./routes/company-metrics";
 import eventsRouter from "./routes/events";
 import optionsRouter from "./routes/options";
+import pollsRouter from "./routes/polls";
 import realtimeOptionsRouter from "./routes/realtime-options";
 import realtimeStockPricesRouter from "./routes/realtime-stock-prices";
 import stockPricesRouter from "./routes/stock-prices";
@@ -71,6 +73,8 @@ app.use("/api/alternative-assets", alternativeAssetsRouter);
 app.use("/api/alternative-asset-prices", alternativeAssetPricesRouter);
 app.use("/api/options/realtime", realtimeOptionsRouter);
 app.use("/api/options", optionsRouter);
+app.use("/api/activity", activityRouter);
+app.use("/api/polls", pollsRouter);
 
 app.get("/", (req, res) => {
 	res.json({
@@ -79,14 +83,9 @@ app.get("/", (req, res) => {
 		endpoints: [
 			"/health",
 			"/api/stock-prices",
-			"/api/stock-prices/cache/info",
-			"/api/stock-prices/cache/clear",
 			"/api/stock-prices/realtime/:ticker",
-			"/api/stock-prices/realtime/cached/:ticker",
 			"/api/stock-prices/realtime/update",
 			"/api/companies",
-			"/api/companies/cache/info",
-			"/api/companies/cache/clear",
 			"/api/companies/ticker/:ticker",
 			"/api/company-metrics",
 			"/api/events",
@@ -94,6 +93,14 @@ app.get("/", (req, res) => {
 			"/api/alternative-asset-prices",
 			"/api/options",
 			"/api/options/realtime/:ticker",
+			"/api/activity/track",
+			"/api/activity/stats",
+			"/api/polls/daily",
+			"/api/polls/daily/vote",
+			"/api/polls/daily/votes",
+			"/api/polls/daily/settle",
+			"/api/polls/daily/auto-create",
+			"/api/polls/daily/auto-settle",
 		],
 	});
 });

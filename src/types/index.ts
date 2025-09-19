@@ -101,17 +101,6 @@ export interface RealtimeStockPrice {
 	postMarketTime: string;
 }
 
-// Extended version with cache information
-export interface CachedRealtimeStockPrice extends RealtimeStockPrice {
-	cache: {
-		cachedAt: string;
-		expiresAt: string;
-		timeToRefreshMs: number;
-		timeToRefreshMinutes: number;
-		isFromCache: boolean;
-	};
-}
-
 // NAV Calculations
 export interface NAVData {
 	date: string;
@@ -221,54 +210,6 @@ export interface ProcessedOptionsData {
 	lastUpdated: string;
 }
 
-// Moonshot Investment Types
-export interface MoonshotInvestment {
-	id: string;
-	company_id: string;
-	ticker: string;
-	company_name: string;
-	purchase_date: string;
-	shares_purchased: number;
-	shares_remaining: number; // Current shares held (after any sales)
-	purchase_price_per_share: number;
-	total_cost: number; // Original total cost of shares_purchased
-	current_price?: number; // Real-time price per share
-	current_value?: number; // shares_remaining * current_price
-	investment_thesis?: string;
-	status: "active" | "sold" | "partial_sale";
-	created_at: string;
-	updated_at: string;
-
-	// Calculated fields (for UI)
-	shares_sold?: number; // shares_purchased - shares_remaining
-	remaining_cost_basis?: number; // (shares_remaining / shares_purchased) * total_cost
-	unrealized_gain_loss?: number; // current_value - remaining_cost_basis
-	unrealized_gain_loss_percent?: number;
-}
-
-export interface MoonshotPortfolio {
-	totalInvestments: number;
-	totalCostBasis: number;
-	totalCurrentValue: number;
-	totalUnrealizedGainLoss: number;
-	totalUnrealizedGainLossPercent: number;
-	investments: MoonshotInvestment[];
-	allocationPercentOfTreasury: number;
-}
-
-export interface MoonshotTransaction {
-	id: string;
-	investment_id: string;
-	transaction_type: "buy" | "sell";
-	transaction_date: string;
-	shares: number;
-	price_per_share: number;
-	total_amount: number;
-	fees?: number;
-	notes?: string;
-	created_at: string;
-}
-
 // Alternative Assets - Extended and unified asset tracking system
 export interface AlternativeAsset {
 	id: string;
@@ -282,16 +223,11 @@ export interface AlternativeAsset {
 		| "crypto"
 		| "bond"
 		| "other";
-	asset_category:
-		| "moonshot"
-		| "strategic"
-		| "hedge"
-		| "diversification"
-		| "other";
+	asset_category: "strategic" | "hedge" | "diversification" | "other";
 	ticker?: string; // For publicly traded assets
 	asset_name: string;
 
-	// Investment details (from moonshot schema)
+	// Investment details
 	purchase_date: string;
 	shares_purchased: number;
 	shares_remaining: number; // Current shares held (after any sales)
@@ -345,3 +281,79 @@ export interface AlternativeAssetTransaction {
 
 // Note: Alternative asset prices are stored in the existing stock_prices table
 // linked via company_id. This reuses the existing infrastructure.
+
+// Activity tracking types
+export interface TrackActivityRequest {
+	activity_type: "dashboard_view" | "poll_vote";
+	duration_seconds?: number;
+	session_id: string;
+}
+
+export interface TrackActivityResponse {
+	points_awarded: number;
+}
+
+export interface ActivityStatsResponse {
+	daily_points: number;
+	weekly_points: number;
+	active_days_this_week: number;
+	date: string;
+	max_daily_points: number;
+	is_market_day: boolean;
+}
+
+// Daily poll types
+export interface DailyPoll {
+	id: string;
+	asset_symbol: "BMNR" | "ETH-USD";
+	poll_date: string;
+	target_price?: number;
+	step_size: number;
+	max_points: number;
+	market_open_time?: string;
+	market_close_time?: string;
+	cutoff_time?: string;
+	early_bonus_cutoff?: string;
+	status: "open" | "settled";
+	created_at: string;
+}
+
+export interface DailyPollVote {
+	id: string;
+	poll_id: string;
+	user_id: string;
+	predicted_price: number;
+	points_earned: number;
+	early_bonus_applied: boolean;
+	created_at: string;
+}
+
+export interface CreateDailyPollRequest {
+	asset_symbol: "BMNR" | "ETH-USD";
+	poll_date: string;
+	step_size?: number;
+	max_points?: number;
+	market_open_time?: string;
+	market_close_time?: string;
+}
+
+export interface SubmitVoteRequest {
+	poll_id: string;
+	predicted_price: number;
+}
+
+export interface SettlePollRequest {
+	poll_id: string;
+	target_price: number;
+}
+
+export interface AutoSettlePollRequest {
+	asset_symbol: "BMNR" | "ETH-USD";
+	poll_date: string;
+	target_price: number;
+}
+
+export interface AutoCreatePollRequest {
+	date: string;
+	assets: ("BMNR" | "ETH-USD")[];
+}
