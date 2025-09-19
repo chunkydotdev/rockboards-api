@@ -14,6 +14,8 @@ const router: Router = Router();
 // GET /api/alternative-assets - Get all alternative assets with portfolio summary
 router.get("/", async (req: Request, res: Response) => {
 	try {
+		const { companyId } = req.query;
+
 		// Fetch all alternative assets with company data
 		const { data: assets, error } = await supabase
 			.from("alternative_assets")
@@ -21,6 +23,7 @@ router.get("/", async (req: Request, res: Response) => {
 				*,
 				companies!inner(ticker, name)
 			`)
+			.eq("company_id", companyId)
 			.order("purchase_date", { ascending: false });
 
 		if (error) {
