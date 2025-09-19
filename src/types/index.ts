@@ -101,6 +101,17 @@ export interface RealtimeStockPrice {
 	postMarketTime: string;
 }
 
+// Cached version of RealtimeStockPrice with cache metadata
+export interface CachedRealtimeStockPrice extends RealtimeStockPrice {
+	cache: {
+		cachedAt: string;
+		expiresAt: string;
+		timeToRefreshMs: number;
+		timeToRefreshMinutes: number;
+		isFromCache: boolean;
+	};
+}
+
 // NAV Calculations
 export interface NAVData {
 	date: string;
