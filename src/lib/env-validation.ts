@@ -1,6 +1,6 @@
 // Environment variable validation
 export function validateEnvironment() {
-	const requiredVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY"];
+	const requiredVars = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "CRON_SECRET"];
 
 	const missingVars = requiredVars.filter((varName) => !process.env[varName]);
 
