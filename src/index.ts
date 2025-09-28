@@ -7,11 +7,14 @@ import alternativeAssetsRouter from "./routes/alternative-assets";
 import companiesRouter from "./routes/companies";
 import companyMetricsRouter from "./routes/company-metrics";
 import eventsRouter from "./routes/events";
+import mnavAlertsRouter from "./routes/mnav-alerts";
+import mnavMonitorRouter from "./routes/mnav-monitor";
 import optionsRouter from "./routes/options";
 import pollsRouter from "./routes/polls";
 import realtimeOptionsRouter from "./routes/realtime-options";
 import realtimeStockPricesRouter from "./routes/realtime-stock-prices";
 import stockPricesRouter from "./routes/stock-prices";
+import { mnavMonitor } from "./services/mnav-monitor";
 
 // Validate required environment variables
 validateEnvironment();
@@ -75,6 +78,8 @@ app.use("/api/options/realtime", realtimeOptionsRouter);
 app.use("/api/options", optionsRouter);
 app.use("/api/activity", activityRouter);
 app.use("/api/polls", pollsRouter);
+app.use("/api/mnav-monitor", mnavMonitorRouter);
+app.use("/api/mnav-alerts", mnavAlertsRouter);
 
 app.get("/", (req, res) => {
 	res.json({
@@ -136,6 +141,12 @@ app.listen(port, () => {
 	console.log(`🚀 BMNR API Service running on port ${port}`);
 	console.log(`📍 Health check: http://localhost:${port}/health`);
 	console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+
+	// Start MNAV monitoring service
+	if (process.env.ENABLE_MNAV_MONITORING !== "false") {
+		console.log("🔔 Starting MNAV monitoring service...");
+		mnavMonitor.startMonitoring(15); // Check every 15 minutes
+	}
 });
 
 export default app;
