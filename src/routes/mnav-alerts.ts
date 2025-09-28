@@ -12,12 +12,6 @@ interface NotificationWithRelations {
 	user_profiles: {
 		id: string;
 		email: string;
-		telegram_chat_id?: string;
-		telegram_username?: string;
-		whatsapp_phone?: string;
-		notification_email: boolean;
-		notification_telegram: boolean;
-		notification_whatsapp: boolean;
 	} | null;
 	companies: {
 		name: string;
@@ -78,13 +72,7 @@ router.get("/triggered", async (req: Request, res: Response) => {
 				created_at,
 				user_profiles!mnav_notifications_user_id_fkey (
 					id,
-					email,
-					telegram_chat_id,
-					telegram_username,
-					whatsapp_phone,
-					notification_email,
-					notification_telegram,
-					notification_whatsapp
+					email
 				),
 				companies!mnav_notifications_company_id_fkey (
 					name,
@@ -113,14 +101,11 @@ router.get("/triggered", async (req: Request, res: Response) => {
 				current_mnav: notification.mnav_value,
 				alert_type: notification.alert_type as "above" | "below",
 				created_at: notification.created_at,
-				telegram_chat_id: notification.user_profiles?.telegram_chat_id,
-				whatsapp_phone: notification.user_profiles?.whatsapp_phone,
-				notification_email:
-					notification.user_profiles?.notification_email ?? true,
-				notification_telegram:
-					notification.user_profiles?.notification_telegram ?? false,
-				notification_whatsapp:
-					notification.user_profiles?.notification_whatsapp ?? false,
+				telegram_chat_id: undefined, // Not available in current schema
+				whatsapp_phone: undefined, // Not available in current schema
+				notification_email: true, // Default to true for now
+				notification_telegram: false, // Default to false
+				notification_whatsapp: false, // Default to false
 			}),
 		);
 
@@ -139,7 +124,10 @@ router.get("/triggered", async (req: Request, res: Response) => {
 				total_notifications: triggeredAlerts.length,
 				email_notifications: emailAlerts.length,
 			},
-			message: `Found ${emailAlerts.length} email notifications to send (${triggeredAlerts.length} total)`,
+			message:
+				emailAlerts.length > 0
+					? `Found ${emailAlerts.length} email notifications to send (${triggeredAlerts.length} total)`
+					: "No triggered alerts found - all clear!",
 		};
 
 		console.log(`Retrieved ${emailAlerts.length} triggered email alerts`);
