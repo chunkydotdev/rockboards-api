@@ -1,6 +1,24 @@
 import { type Request, type Response, Router } from "express";
 import { handleDbError, supabaseServiceRole } from "../lib/supabase";
+import { calculateCurrentMnav } from "../services/mnav-service";
 import type { ApiResponse } from "../types";
+
+// Database types
+interface ActiveAlert {
+	id: string;
+	user_id: string;
+	company_id: string;
+	threshold_value: number;
+	alert_type: string;
+	is_active: boolean;
+	last_triggered_at: string | null;
+	created_at: string;
+	updated_at: string;
+	company_ticker: string;
+	company_name: string;
+	user_email: string;
+	recent_trigger_count: number;
+}
 
 const router: Router = Router();
 
@@ -17,164 +35,7 @@ function requireCronAuth(req: Request) {
 	return { authenticated: true as const };
 }
 
-// Helper function to fetch current ETH price from CoinGecko
-async function getCurrentEthPrice(): Promise<number> {
-	try {
-		const response = await fetch(
-			"https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
-		);
-		const data = (await response.json()) as { ethereum?: { usd?: number } };
-		return data.ethereum?.usd || 0;
-	} catch (error) {
-		console.error("Error fetching ETH price:", error);
-		return 0;
-	}
-}
-
-// Helper function to fetch current BMNR stock price
-async function getCurrentBmnrPrice(): Promise<number> {
-	try {
-		// Try to get from realtime stock prices table first
-		const { data: realtimePrice } = await supabaseServiceRole
-			.from("realtime_stock_prices")
-			.select("price")
-			.eq("ticker", "BMNR")
-			.single();
-
-		if (realtimePrice?.price) {
-			return realtimePrice.price;
-		}
-
-		// Fallback to latest stock_prices entry
-		const { data: stockPrice } = await supabaseServiceRole
-			.from("stock_prices")
-			.select("close")
-			.eq("company_id", "4bf5e88a-dfba-44d0-bdfb-7d878cbd10db") // BMNR company ID
-			.order("date", { ascending: false })
-			.limit(1)
-			.single();
-
-		return stockPrice?.close || 0;
-	} catch (error) {
-		console.error("Error fetching BMNR price:", error);
-		return 0;
-	}
-}
-
-// Helper function to get latest company metrics
-async function getLatestCompanyMetrics(companyId: string) {
-	try {
-		const { data: metrics, error } = await supabaseServiceRole
-			.from("company_metrics")
-			.select("*")
-			.eq("company_id", companyId)
-			.order("date", { ascending: false })
-			.limit(1)
-			.single();
-
-		if (error) {
-			console.error("Error fetching company metrics:", error);
-			return null;
-		}
-
-		return metrics;
-	} catch (error) {
-		console.error("Error in getLatestCompanyMetrics:", error);
-		return null;
-	}
-}
-
-// Helper function to get alternative assets current value
-async function getAlternativeAssetsValue(companyId: string): Promise<number> {
-	try {
-		const { data: portfolio } = await supabaseServiceRole
-			.from("alternative_assets")
-			.select("shares_remaining, current_price")
-			.eq("company_id", companyId)
-			.eq("status", "active");
-
-		if (!portfolio || portfolio.length === 0) {
-			return 0;
-		}
-
-		// Calculate total current value
-		const totalValue = portfolio.reduce((sum, asset) => {
-			const currentValue =
-				(asset.shares_remaining || 0) * (asset.current_price || 0);
-			return sum + currentValue;
-		}, 0);
-
-		return totalValue;
-	} catch (error) {
-		console.error("Error fetching alternative assets value:", error);
-		return 0;
-	}
-}
-
-// Calculate current MNAV for a company
-async function calculateCurrentMnav(companyId: string): Promise<number | null> {
-	try {
-		// Get latest metrics
-		const metrics = await getLatestCompanyMetrics(companyId);
-		if (!metrics) {
-			console.error("No metrics found for company:", companyId);
-			return null;
-		}
-
-		// Get current prices
-		const [ethPrice, stockPrice] = await Promise.all([
-			getCurrentEthPrice(),
-			getCurrentBmnrPrice(),
-		]);
-
-		if (!ethPrice || !stockPrice) {
-			console.error(
-				"Missing price data - ETH:",
-				ethPrice,
-				"Stock:",
-				stockPrice,
-			);
-			return null;
-		}
-
-		// Get alternative assets value
-		const alternativeAssetsValue = await getAlternativeAssetsValue(companyId);
-
-		// Calculate MNAV using the same logic as frontend
-		const ethMarketValue = (metrics.eth_holdings || 0) * ethPrice;
-		const usdHoldings = metrics.usd_holdings || 0;
-		const totalNavValue = ethMarketValue + usdHoldings + alternativeAssetsValue;
-
-		// Calculate market cap
-		const sharesOutstanding = metrics.shares_outstanding || 0;
-		const marketCap = stockPrice * sharesOutstanding;
-
-		if (totalNavValue === 0) {
-			console.error("Total NAV value is zero for company:", companyId);
-			return null;
-		}
-
-		const mNav = marketCap / totalNavValue;
-
-		console.log(`MNAV calculation for ${companyId}:`, {
-			ethHoldings: metrics.eth_holdings,
-			ethPrice,
-			ethMarketValue,
-			usdHoldings,
-			alternativeAssetsValue,
-			totalNavValue,
-			sharesOutstanding,
-			stockPrice,
-			marketCap,
-			mNav,
-		});
-
-		return mNav;
-	} catch (error) {
-		console.error("Error calculating MNAV:", error);
-		return null;
-	}
-}
+// Note: MNAV calculation logic moved to mnav-service.ts
 
 // Check all active alerts and trigger notifications
 async function checkMnavThresholds(): Promise<{
@@ -198,8 +59,11 @@ async function checkMnavThresholds(): Promise<{
 
 		console.log(`Checking ${alerts.length} active alerts`);
 
+		// Type the alerts properly
+		const typedAlerts = alerts as ActiveAlert[];
+
 		// Group alerts by company to avoid redundant calculations
-		const alertsByCompany = alerts.reduce(
+		const alertsByCompany = typedAlerts.reduce(
 			(acc, alert) => {
 				const companyId = alert.company_id;
 				if (!acc[companyId]) {
@@ -208,7 +72,7 @@ async function checkMnavThresholds(): Promise<{
 				acc[companyId].push(alert);
 				return acc;
 			},
-			{} as Record<string, typeof alerts>,
+			{} as Record<string, ActiveAlert[]>,
 		);
 
 		let alertsTriggered = 0;
@@ -226,7 +90,7 @@ async function checkMnavThresholds(): Promise<{
 			}
 
 			// Check each alert for this company
-			for (const alert of companyAlerts as typeof alerts) {
+			for (const alert of companyAlerts) {
 				const shouldTrigger = checkAlertCondition(
 					currentMnav,
 					alert.threshold_value,
