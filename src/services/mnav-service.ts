@@ -65,7 +65,7 @@ interface AlternativeAssetsPortfolio {
 // Utility functions
 function normalizeDate(dateStr: string): string {
 	const date = new Date(dateStr);
-	return date.toISOString().split("T")[0] + "T00:00:00.000Z";
+	return `${date.toISOString().split("T")[0]}T00:00:00.000Z`;
 }
 
 function addDays(date: Date, days: number): Date {
@@ -82,13 +82,24 @@ function differenceInDays(date1: Date, date2: Date): number {
 // Helper function to fetch current ETH price from CoinGecko
 export async function getCurrentEthPrice(): Promise<number> {
 	try {
+		const { data: realtimePrice } = await supabaseServiceRole
+			.from("realtime_stock_prices")
+			.select("price")
+			.eq("ticker", "ETHUSD")
+			.single();
+
+		const price = realtimePrice?.price;
+
+		if (price) {
+			return price;
+		}
+
 		const response = await fetch(
 			"https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
 		);
 		const data = (await response.json()) as { ethereum?: { usd?: number } };
 		return data.ethereum?.usd || 0;
 	} catch (error) {
-		console.error("Error fetching ETH price:", error);
 		return 0;
 	}
 }
@@ -99,18 +110,23 @@ export async function getCurrentBmnrPrice(): Promise<number> {
 		// Try to get from realtime stock prices table first
 		const { data: realtimePrice } = await supabaseServiceRole
 			.from("realtime_stock_prices")
-			.select("price")
+			.select("price, pre_market_price, post_market_price")
 			.eq("ticker", "BMNR")
 			.single();
 
-		if (realtimePrice?.price) {
-			return realtimePrice.price;
+		const price =
+			realtimePrice?.pre_market_price ||
+			realtimePrice?.post_market_price ||
+			realtimePrice?.price;
+
+		if (price) {
+			return price;
 		}
 
 		// Fallback to latest stock_prices entry
 		const { data: stockPrice } = await supabaseServiceRole
 			.from("stock_prices")
-			.select("close")
+			.select("close, date")
 			.eq("company_id", "4bf5e88a-dfba-44d0-bdfb-7d878cbd10db") // BMNR company ID
 			.order("date", { ascending: false })
 			.limit(1)
@@ -118,7 +134,6 @@ export async function getCurrentBmnrPrice(): Promise<number> {
 
 		return stockPrice?.close || 0;
 	} catch (error) {
-		console.error("Error fetching BMNR price:", error);
 		return 0;
 	}
 }
@@ -137,13 +152,11 @@ export async function getLatestCompanyMetrics(
 			.single();
 
 		if (error) {
-			console.error("Error fetching company metrics:", error);
 			return null;
 		}
 
 		return metrics as CompanyMetrics;
 	} catch (error) {
-		console.error("Error in getLatestCompanyMetrics:", error);
 		return null;
 	}
 }
@@ -167,13 +180,11 @@ export async function getAllCompanyMetrics(
 		const { data: metrics, error } = await query;
 
 		if (error) {
-			console.error("Error fetching all company metrics:", error);
 			return [];
 		}
 
 		return (metrics as CompanyMetrics[]) || [];
 	} catch (error) {
-		console.error("Error in getAllCompanyMetrics:", error);
 		return [];
 	}
 }
@@ -197,43 +208,40 @@ export async function getStockPrices(
 		const { data: prices, error } = await query;
 
 		if (error) {
-			console.error("Error fetching stock prices:", error);
 			return [];
 		}
 
 		return (prices as StockPrice[]) || [];
 	} catch (error) {
-		console.error("Error in getStockPrices:", error);
 		return [];
 	}
 }
 
-// Helper function to get alternative assets current value
+// Helper function to get alternative assets current value using the same API as frontend
 export async function getAlternativeAssetsValue(
 	companyId: string,
 ): Promise<number> {
 	try {
-		const { data: portfolio } = await supabaseServiceRole
-			.from("alternative_assets")
-			.select("shares_remaining, current_price")
-			.eq("company_id", companyId)
-			.eq("status", "active");
+		// Use the same alternative assets API endpoint as frontend
+		const response = await fetch(
+			`http://localhost:4000/api/alternative-assets?companyId=${companyId}`,
+		);
 
-		if (!portfolio || portfolio.length === 0) {
+		if (!response.ok) {
 			return 0;
 		}
 
-		// Calculate total current value
-		const typedPortfolio = portfolio as AlternativeAsset[];
-		const totalValue = typedPortfolio.reduce((sum, asset) => {
-			const currentValue =
-				(asset.shares_remaining || 0) * (asset.current_price || 0);
-			return sum + currentValue;
-		}, 0);
+		const apiResponse = (await response.json()) as {
+			data?: AlternativeAssetsPortfolio;
+		};
 
-		return totalValue;
+		if (!apiResponse.data) {
+			return 0;
+		}
+
+		const totalCurrentValue = apiResponse.data.totalCurrentValue || 0;
+		return totalCurrentValue;
 	} catch (error) {
-		console.error("Error fetching alternative assets value:", error);
 		return 0;
 	}
 }
@@ -402,13 +410,6 @@ export function postFillMetrics(
 	// Keep track of last known stock price for post-filling
 	let lastKnownStockPrice: number | undefined;
 
-	console.log(`Debug: Processing ${dates.length} dates from ${startDate}`);
-	if (dates.length > 0) {
-		console.log(
-			`Debug: First date: ${dates[0].toISOString()}, Last date: ${dates[dates.length - 1].toISOString()}`,
-		);
-	}
-
 	for (const date of dates) {
 		const dateIso = date.toISOString();
 		const dateOnly = date.toISOString().split("T")[0]; // Extract just the date part (YYYY-MM-DD)
@@ -531,12 +532,6 @@ export async function calculateCurrentNAV(
 		const stockPrice = currentStockPrice || (await getCurrentBmnrPrice());
 
 		if (!ethPrice || !stockPrice) {
-			console.error(
-				"Missing price data - ETH:",
-				ethPrice,
-				"Stock:",
-				stockPrice,
-			);
 			return null;
 		}
 
@@ -547,16 +542,8 @@ export async function calculateCurrentNAV(
 		]);
 
 		if (!allMetrics.length || !allStockPrices.length) {
-			console.error("No metrics or stock prices found for company:", companyId);
 			return null;
 		}
-
-		// Debug: Log what data we have
-		console.log(
-			`Debug: Found ${allMetrics.length} metrics and ${allStockPrices.length} stock prices`,
-		);
-		console.log("Sample metric:", allMetrics[0]);
-		console.log("Sample stock price:", allStockPrices[0]);
 
 		// Process metrics through the same pipeline as frontend
 		const startDate = "2025-06-12"; // Same start date as frontend
@@ -566,29 +553,7 @@ export async function calculateCurrentNAV(
 			startDate,
 		);
 
-		console.log(
-			`Debug: Post-fill resulted in ${processedMetrics.length} processed metrics`,
-		);
-
 		if (!processedMetrics.length) {
-			console.error("No processed metrics after post-fill");
-			// Try with a much earlier start date to see if we get any data
-			const earlierStartDate = "2024-01-01";
-			const fallbackMetrics = postFillMetrics(
-				allMetrics,
-				allStockPrices,
-				earlierStartDate,
-			);
-			console.log(
-				`Debug: Fallback with ${earlierStartDate} gave ${fallbackMetrics.length} metrics`,
-			);
-
-			if (fallbackMetrics.length > 0) {
-				console.log("Using fallback metrics");
-				const latestFallback = fallbackMetrics[fallbackMetrics.length - 1];
-				console.log("Latest fallback metric:", latestFallback);
-			}
-
 			return null;
 		}
 
@@ -602,11 +567,6 @@ export async function calculateCurrentNAV(
 		const { ethHoldings, sharesOutstanding, usdHoldings } = latestMetric;
 
 		if (!ethHoldings || !sharesOutstanding || usdHoldings === undefined) {
-			console.error("Missing required metric data:", {
-				ethHoldings,
-				sharesOutstanding,
-				usdHoldings,
-			});
 			return null;
 		}
 
@@ -614,22 +574,9 @@ export async function calculateCurrentNAV(
 		const totalNavValue = ethMarketValue + usdHoldings + alternativeAssetsValue;
 		const navPerShare = totalNavValue / sharesOutstanding;
 
-		// Calculate market cap using current stock price
+		// Calculate market cap using current real-time stock price (not historical)
 		const marketCap = stockPrice * sharesOutstanding;
 		const mNav = marketCap / totalNavValue;
-
-		console.log(`MNAV calculation for ${companyId}:`, {
-			ethHoldings,
-			ethPrice,
-			ethMarketValue,
-			usdHoldings,
-			alternativeAssetsValue,
-			totalNavValue,
-			sharesOutstanding,
-			stockPrice,
-			marketCap,
-			mNav,
-		});
 
 		return {
 			companyId,
@@ -641,7 +588,6 @@ export async function calculateCurrentNAV(
 			totalNavValue,
 		};
 	} catch (error) {
-		console.error("Error calculating current NAV:", error);
 		return null;
 	}
 }

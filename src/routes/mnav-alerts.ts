@@ -1,3 +1,4 @@
+import { getAuthenticatedUser } from "@/lib/user-authentication";
 import { type Request, type Response, Router } from "express";
 import { handleDbError, supabaseServiceRole } from "../lib/supabase";
 import type { ApiResponse } from "../types";
@@ -390,6 +391,337 @@ router.get("/stats", async (req: Request, res: Response) => {
 		res.json(response);
 	} catch (error) {
 		console.error("Get alert stats error:", error);
+		res.status(500).json(handleDbError(error));
+	}
+});
+
+// =============================================================================
+// USER-FACING CRUD ENDPOINTS FOR MNAV ALERTS
+// =============================================================================
+
+// User alert types
+interface MnavThresholdAlert {
+	id: string;
+	user_id: string;
+	company_id: string;
+	threshold_value: number;
+	alert_type: "above" | "below";
+	is_active: boolean;
+	last_triggered_at: string | null;
+	created_at: string;
+	updated_at: string;
+	company_name?: string;
+	company_ticker?: string;
+}
+
+interface CompanyInfo {
+	name: string;
+	ticker: string;
+}
+
+interface AlertWithCompany {
+	id: string;
+	user_id: string;
+	company_id: string;
+	threshold_value: number;
+	alert_type: "above" | "below";
+	is_active: boolean;
+	last_triggered_at: string | null;
+	created_at: string;
+	updated_at: string;
+	companies: CompanyInfo | null;
+}
+
+interface CreateMnavAlertRequest {
+	company_id: string;
+	threshold_value: number;
+	alert_type: "above" | "below";
+	is_active?: boolean;
+}
+
+interface UpdateMnavAlertRequest {
+	threshold_value?: number;
+	alert_type?: "above" | "below";
+	is_active?: boolean;
+}
+
+// GET /api/mnav-alerts - Get user's MNAV alerts
+router.get("/", async (req: Request, res: Response) => {
+	try {
+		const userResult = await getAuthenticatedUser(req);
+		if (!userResult) {
+			return res.status(401).json({ error: "Unauthorized" });
+		}
+
+		const { limit = 50, offset = 0 } = req.query;
+
+		// Get user's alerts with company information
+		const { data: alerts, error } = await supabaseServiceRole
+			.from("mnav_threshold_alerts")
+			.select(`
+				*,
+				companies!mnav_threshold_alerts_company_id_fkey (
+					name,
+					ticker
+				)
+			`)
+			.eq("user_id", userResult.user.id)
+			.order("created_at", { ascending: false })
+			.range(Number(offset), Number(offset) + Number(limit) - 1);
+
+		if (error) {
+			throw error;
+		}
+
+		// Transform the data to include company info at top level
+		const transformedAlerts: MnavThresholdAlert[] = (
+			(alerts as AlertWithCompany[]) || []
+		).map((alert: AlertWithCompany) => ({
+			id: alert.id,
+			user_id: alert.user_id,
+			company_id: alert.company_id,
+			threshold_value: alert.threshold_value,
+			alert_type: alert.alert_type,
+			is_active: alert.is_active,
+			last_triggered_at: alert.last_triggered_at,
+			created_at: alert.created_at,
+			updated_at: alert.updated_at,
+			company_name: alert.companies?.name,
+			company_ticker: alert.companies?.ticker,
+		}));
+
+		// Get total count for pagination
+		const { count } = await supabaseServiceRole
+			.from("mnav_threshold_alerts")
+			.select("*", { count: "exact", head: true })
+			.eq("user_id", userResult.user.id);
+
+		const response: ApiResponse<{
+			alerts: MnavThresholdAlert[];
+			total: number;
+			limit: number;
+			offset: number;
+		}> = {
+			data: {
+				alerts: transformedAlerts,
+				total: count || 0,
+				limit: Number(limit),
+				offset: Number(offset),
+			},
+		};
+
+		res.json(response);
+	} catch (error) {
+		console.error("Get user alerts error:", error);
+		res.status(500).json(handleDbError(error));
+	}
+});
+
+// POST /api/mnav-alerts - Create new MNAV alert
+router.post("/", async (req: Request, res: Response) => {
+	try {
+		const userResult = await getAuthenticatedUser(req);
+		if (!userResult) {
+			return res.status(401).json({ error: "Unauthorized" });
+		}
+
+		const {
+			company_id,
+			threshold_value,
+			alert_type,
+			is_active = true,
+		}: CreateMnavAlertRequest = req.body;
+
+		// Validate input
+		if (!company_id || !threshold_value || !alert_type) {
+			return res.status(400).json({
+				error: "company_id, threshold_value, and alert_type are required",
+			});
+		}
+
+		if (!["above", "below"].includes(alert_type)) {
+			return res.status(400).json({
+				error: "alert_type must be 'above' or 'below'",
+			});
+		}
+
+		if (threshold_value < 0 || threshold_value > 10) {
+			return res.status(400).json({
+				error: "threshold_value must be between 0 and 10",
+			});
+		}
+
+		// Check if company exists
+		const { data: company, error: companyError } = await supabaseServiceRole
+			.from("companies")
+			.select("id, name, ticker")
+			.eq("id", company_id)
+			.single();
+
+		if (companyError || !company) {
+			return res.status(404).json({
+				error: "Company not found",
+			});
+		}
+
+		// Check if user already has 5 alerts for this company
+		const { count } = await supabaseServiceRole
+			.from("mnav_threshold_alerts")
+			.select("*", { count: "exact", head: true })
+			.eq("user_id", userResult.user.id)
+			.eq("company_id", company_id);
+
+		if (count && count >= 5) {
+			return res.status(400).json({
+				error: "Maximum 5 alerts per company allowed",
+			});
+		}
+
+		// Create the alert
+		const { data: newAlert, error: insertError } = await supabaseServiceRole
+			.from("mnav_threshold_alerts")
+			.insert({
+				user_id: userResult.user.id,
+				company_id,
+				threshold_value,
+				alert_type,
+				is_active,
+			})
+			.select()
+			.single();
+
+		if (insertError) {
+			throw insertError;
+		}
+
+		// Transform response to include company info
+		const response: ApiResponse<MnavThresholdAlert> = {
+			data: {
+				...newAlert,
+				company_name: company.name,
+				company_ticker: company.ticker,
+			},
+			message: "Alert created successfully",
+		};
+
+		res.status(201).json(response);
+	} catch (error) {
+		console.error("Create alert error:", error);
+		res.status(500).json(handleDbError(error));
+	}
+});
+
+// PATCH /api/mnav-alerts/:id - Update MNAV alert
+router.patch("/:id", async (req: Request, res: Response) => {
+	try {
+		const userResult = await getAuthenticatedUser(req);
+		if (!userResult) {
+			return res.status(401).json({ error: "Unauthorized" });
+		}
+
+		const { id } = req.params;
+		const { threshold_value, alert_type, is_active }: UpdateMnavAlertRequest =
+			req.body;
+
+		// Validate input
+		if (
+			threshold_value !== undefined &&
+			(threshold_value < 0 || threshold_value > 10)
+		) {
+			return res.status(400).json({
+				error: "threshold_value must be between 0 and 10",
+			});
+		}
+
+		if (alert_type && !["above", "below"].includes(alert_type)) {
+			return res.status(400).json({
+				error: "alert_type must be 'above' or 'below'",
+			});
+		}
+
+		// Build update object
+		const updateData: Partial<{
+			threshold_value: number;
+			alert_type: "above" | "below";
+			is_active: boolean;
+			updated_at: string;
+		}> = { updated_at: new Date().toISOString() };
+
+		if (threshold_value !== undefined)
+			updateData.threshold_value = threshold_value;
+		if (alert_type !== undefined) updateData.alert_type = alert_type;
+		if (is_active !== undefined) updateData.is_active = is_active;
+
+		// Update the alert (only if it belongs to the user)
+		const { data: updatedAlert, error } = await supabaseServiceRole
+			.from("mnav_threshold_alerts")
+			.update(updateData)
+			.eq("id", id)
+			.eq("user_id", userResult.user.id)
+			.select(`
+				*,
+				companies!mnav_threshold_alerts_company_id_fkey (
+					name,
+					ticker
+				)
+			`)
+			.single();
+
+		if (error) {
+			if (error.code === "PGRST116") {
+				return res.status(404).json({
+					error: "Alert not found or you don't have permission to update it",
+				});
+			}
+			throw error;
+		}
+
+		// Transform response
+		const response: ApiResponse<MnavThresholdAlert> = {
+			data: {
+				...updatedAlert,
+				company_name: updatedAlert.companies?.name,
+				company_ticker: updatedAlert.companies?.ticker,
+			},
+			message: "Alert updated successfully",
+		};
+
+		res.json(response);
+	} catch (error) {
+		console.error("Update alert error:", error);
+		res.status(500).json(handleDbError(error));
+	}
+});
+
+// DELETE /api/mnav-alerts/:id - Delete MNAV alert
+router.delete("/:id", async (req: Request, res: Response) => {
+	try {
+		const userResult = await getAuthenticatedUser(req);
+		if (!userResult) {
+			return res.status(401).json({ error: "Unauthorized" });
+		}
+
+		const { id } = req.params;
+
+		// Delete the alert (only if it belongs to the user)
+		const { error } = await supabaseServiceRole
+			.from("mnav_threshold_alerts")
+			.delete()
+			.eq("id", id)
+			.eq("user_id", userResult.user.id);
+
+		if (error) {
+			throw error;
+		}
+
+		const response: ApiResponse<{ success: boolean }> = {
+			data: { success: true },
+			message: "Alert deleted successfully",
+		};
+
+		res.json(response);
+	} catch (error) {
+		console.error("Delete alert error:", error);
 		res.status(500).json(handleDbError(error));
 	}
 });
