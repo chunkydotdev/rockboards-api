@@ -39,6 +39,8 @@ const corsOptions = {
 			"https://www.bmnr.rocks",
 			"https://sbet.rocks",
 			"https://www.sbet.rocks",
+			"https://btbt.rocks",
+			"https://www.btbt.rocks",
 			"http://localhost:3000",
 			"http://localhost:3001",
 		];
