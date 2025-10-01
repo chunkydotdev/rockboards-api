@@ -1,6 +1,6 @@
-import { getAuthenticatedUser } from "@/lib/user-authentication";
 import { type Request, type Response, Router } from "express";
 import { handleDbError, supabaseServiceRole } from "../lib/supabase";
+import { getAuthenticatedUser } from "../lib/user-authentication";
 import type { ApiResponse } from "../types";
 
 // Database response types
