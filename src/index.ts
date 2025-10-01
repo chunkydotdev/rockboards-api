@@ -59,7 +59,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Health check endpoint
-app.get("/health", (req, res) => {
+app.get("/api/health", (req, res) => {
 	res.json({
 		status: "healthy",
 		timestamp: new Date().toISOString(),
@@ -145,7 +145,7 @@ app.use("*", (req, res) => {
 
 app.listen(port, () => {
 	console.log(`🚀 BMNR API Service running on port ${port}`);
-	console.log(`📍 Health check: http://localhost:${port}/health`);
+	console.log(`📍 Health check: http://localhost:${port}/api/health`);
 	console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 });
 
