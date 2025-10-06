@@ -1,108 +1,112 @@
-import { type Request, type Response, Router } from "express";
+import { type Request, Router } from "express";
 import {
 	CacheDuration,
 	EndpointCache,
 	createCacheManagementRoutes,
 	createCacheMiddleware,
 } from "../lib/cache";
-import { handleDbError, supabase } from "../lib/supabase";
-import type { ApiResponse, Company, CompanyWithData } from "../types";
+import { supabase } from "../lib/supabase";
+import type { Company, CompanyWithData } from "../types";
 
 const router: Router = Router();
 
-// Create cache instance for companies with 1 hour TTL
-const companiesCache = new EndpointCache<Company[]>({
+// Create cache instance for companies list - 1 hour TTL (companies rarely change)
+const companiesListCache = new EndpointCache<Company[]>({
 	ttlMs: CacheDuration.HOUR,
-	keyPrefix: "companies",
+	keyPrefix: "companies_list",
 });
 
-// Data fetcher function for companies
-async function fetchCompanies(): Promise<Company[]> {
+// Create cache instance for company by ticker - 10 minutes TTL
+const companyByTickerCache = new EndpointCache<CompanyWithData>({
+	ttlMs: CacheDuration.MINUTES(10),
+	keyPrefix: "company_by_ticker",
+	generateKey: (req) => {
+		const ticker = req.params.ticker?.toUpperCase() || "";
+		const include = req.query.include || "";
+		return `company:${ticker}:include:${include}`;
+	},
+});
+
+// Data fetcher for companies list
+async function fetchCompaniesList(req: Request): Promise<Company[]> {
 	const { data: companies, error } = await supabase
 		.from("companies")
 		.select("*")
 		.order("name");
 
-	if (error) {
-		throw error;
-	}
-
+	if (error) throw error;
 	return companies || [];
 }
 
-// Cache management routes
-const cacheManagement = createCacheManagementRoutes(companiesCache);
+// Data fetcher for company by ticker
+async function fetchCompanyByTicker(req: Request): Promise<CompanyWithData> {
+	const { ticker } = req.params;
+	const { include } = req.query;
 
-// GET /api/companies - Get all companies (with 1-hour caching)
-router.get("/", createCacheMiddleware(companiesCache, fetchCompanies));
+	// Base company query by ticker
+	const { data: company, error: companyError } = await supabase
+		.from("companies")
+		.select("*")
+		.eq("ticker", ticker.toUpperCase())
+		.single();
 
-// GET /api/companies/ticker/:ticker - Get company by ticker with optional related data
-router.get("/ticker/:ticker", async (req: Request, res: Response) => {
-	try {
-		const { ticker } = req.params;
-		const { include } = req.query;
+	if (companyError) throw companyError;
+	if (!company) throw new Error("Company not found");
 
-		// Base company query by ticker
-		const { data: company, error: companyError } = await supabase
-			.from("companies")
-			.select("*")
-			.eq("ticker", ticker.toUpperCase())
-			.single();
+	const result: CompanyWithData = { ...company };
 
-		if (companyError) {
-			return res.status(500).json(handleDbError(companyError));
+	// Include related data based on query parameter
+	if (include) {
+		const includes = (include as string).split(",");
+
+		if (includes.includes("company_metrics")) {
+			const { data: companyMetrics } = await supabase
+				.from("company_metrics")
+				.select("*")
+				.eq("company_id", company.id)
+				.order("date", { ascending: false });
+			result.company_metrics = companyMetrics || [];
 		}
 
-		if (!company) {
-			return res.status(404).json({ error: "Company not found" });
+		if (includes.includes("stock_prices")) {
+			const { data: stockPrices } = await supabase
+				.from("stock_prices")
+				.select("*")
+				.eq("company_id", company.id)
+				.order("date", { ascending: false });
+			result.stock_prices = stockPrices || [];
 		}
 
-		const result: CompanyWithData = { ...company };
-
-		// Include related data based on query parameter
-		if (include) {
-			const includes = (include as string).split(",");
-
-			if (includes.includes("company_metrics")) {
-				const { data: companyMetrics } = await supabase
-					.from("company_metrics")
-					.select("*")
-					.eq("company_id", company.id)
-					.order("date", { ascending: false });
-				result.company_metrics = companyMetrics || [];
-			}
-
-			if (includes.includes("stock_prices")) {
-				const { data: stockPrices } = await supabase
-					.from("stock_prices")
-					.select("*")
-					.eq("company_id", company.id)
-					.order("date", { ascending: false });
-				result.stock_prices = stockPrices || [];
-			}
-
-			if (includes.includes("events")) {
-				const { data: events } = await supabase
-					.from("events")
-					.select("*")
-					.eq("company_id", company.id)
-					.order("date", { ascending: false });
-				result.events = events || [];
-			}
+		if (includes.includes("events")) {
+			const { data: events } = await supabase
+				.from("events")
+				.select("*")
+				.eq("company_id", company.id)
+				.order("date", { ascending: false });
+			result.events = events || [];
 		}
-
-		const response: ApiResponse<CompanyWithData> = {
-			data: result,
-		};
-
-		res.json(response);
-	} catch (error) {
-		res.status(500).json(handleDbError(error));
 	}
-});
+
+	return result;
+}
+
+// Cache management routes
+const listCacheManagement = createCacheManagementRoutes(companiesListCache);
+const tickerCacheManagement = createCacheManagementRoutes(companyByTickerCache);
+
+// GET /api/companies - Get all companies (with automatic caching!)
+router.get("/", createCacheMiddleware(companiesListCache, fetchCompaniesList));
+
+// GET /api/companies/ticker/:ticker - Get company by ticker with optional related data (with automatic caching!)
+router.get(
+	"/ticker/:ticker",
+	createCacheMiddleware(companyByTickerCache, fetchCompanyByTicker),
+);
 
 // Cache management endpoints
-router.get("/cache/info", cacheManagement.info);
-router.delete("/cache/clear", cacheManagement.clear);
+router.get("/cache/list/info", listCacheManagement.info);
+router.delete("/cache/list/clear", listCacheManagement.clear);
+router.get("/cache/ticker/info", tickerCacheManagement.info);
+router.delete("/cache/ticker/clear", tickerCacheManagement.clear);
 
 export default router;

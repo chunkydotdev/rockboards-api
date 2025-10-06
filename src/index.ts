@@ -56,31 +56,50 @@ const corsOptions = {
 	allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
 };
 
-app.use(cors(corsOptions));
+// Public routes - allow ALL origins for embeds (credentials disabled for security)
+app.use(
+	"/api/stock-prices",
+	cors({ origin: "*", credentials: false }),
+	stockPricesRouter,
+);
+app.use(
+	"/api/company-metrics",
+	cors({ origin: "*", credentials: false }),
+	companyMetricsRouter,
+);
+app.use(
+	"/api/companies",
+	cors({ origin: "*", credentials: false }),
+	companiesRouter,
+);
+app.use("/api/events", cors({ origin: "*", credentials: false }), eventsRouter);
+
+// Protected routes - strict CORS whitelist
+app.use("/api/polls", cors(corsOptions), pollsRouter);
+app.use("/api/activity", cors(corsOptions), activityRouter);
+app.use("/api/mnav-alerts", cors(corsOptions), mnavAlertsRouter);
+app.use("/api/mnav-monitor", cors(corsOptions), mnavMonitorRouter);
+app.use("/api/alternative-assets", cors(corsOptions), alternativeAssetsRouter);
+app.use(
+	"/api/alternative-asset-prices",
+	cors(corsOptions),
+	alternativeAssetPricesRouter,
+);
+app.use("/api/options", cors(corsOptions), optionsRouter);
+app.use("/api/options/realtime", cors(corsOptions), realtimeOptionsRouter);
+
+// Realtime stock prices inherits open CORS from /api/stock-prices above
+// Must be registered AFTER base route to work correctly
+app.use("/api/stock-prices/realtime", realtimeStockPricesRouter);
 
 // Health check endpoint
-app.get("/api/health", (req, res) => {
+app.get("/health", (req, res) => {
 	res.json({
 		status: "healthy",
 		timestamp: new Date().toISOString(),
 		service: "bmnr-api-service",
 	});
 });
-
-// API routes
-app.use("/api/stock-prices/realtime", realtimeStockPricesRouter);
-app.use("/api/stock-prices", stockPricesRouter);
-app.use("/api/companies", companiesRouter);
-app.use("/api/company-metrics", companyMetricsRouter);
-app.use("/api/events", eventsRouter);
-app.use("/api/alternative-assets", alternativeAssetsRouter);
-app.use("/api/alternative-asset-prices", alternativeAssetPricesRouter);
-app.use("/api/options/realtime", realtimeOptionsRouter);
-app.use("/api/options", optionsRouter);
-app.use("/api/activity", activityRouter);
-app.use("/api/polls", pollsRouter);
-app.use("/api/mnav-alerts", mnavAlertsRouter);
-app.use("/api/mnav-monitor", mnavMonitorRouter);
 
 app.get("/", (req, res) => {
 	res.json({
@@ -107,6 +126,8 @@ app.get("/", (req, res) => {
 			"/api/polls/daily/settle",
 			"/api/polls/daily/auto-create",
 			"/api/polls/daily/auto-settle",
+			"/api/mnav-alerts",
+			"/api/mnav-alerts/:id",
 			"/api/mnav-alerts/triggered",
 			"/api/mnav-alerts/mark-sent",
 			"/api/mnav-alerts/stats",
@@ -145,7 +166,7 @@ app.use("*", (req, res) => {
 
 app.listen(port, () => {
 	console.log(`🚀 BMNR API Service running on port ${port}`);
-	console.log(`📍 Health check: http://localhost:${port}/api/health`);
+	console.log(`📍 Health check: http://localhost:${port}/health`);
 	console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 });
 
