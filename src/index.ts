@@ -93,7 +93,7 @@ app.use("/api/options/realtime", cors(corsOptions), realtimeOptionsRouter);
 app.use("/api/stock-prices/realtime", realtimeStockPricesRouter);
 
 // Health check endpoint
-app.get("/api/health", (req, res) => {
+app.get("/api/health", cors({ origin: "*", credentials: false }), (req, res) => {
 	res.json({
 		status: "healthy",
 		timestamp: new Date().toISOString(),
