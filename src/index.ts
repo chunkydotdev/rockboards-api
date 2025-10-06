@@ -93,7 +93,7 @@ app.use("/api/options/realtime", cors(corsOptions), realtimeOptionsRouter);
 app.use("/api/stock-prices/realtime", realtimeStockPricesRouter);
 
 // Health check endpoint
-app.get("/health", (req, res) => {
+app.get("/api/health", (req, res) => {
 	res.json({
 		status: "healthy",
 		timestamp: new Date().toISOString(),
@@ -106,7 +106,7 @@ app.get("/", (req, res) => {
 		message: "BMNR API Service",
 		version: "1.0.0",
 		endpoints: [
-			"/health",
+			"/api/health",
 			"/api/stock-prices",
 			"/api/stock-prices/realtime/:ticker",
 			"/api/stock-prices/realtime/update",
@@ -166,7 +166,7 @@ app.use("*", (req, res) => {
 
 app.listen(port, () => {
 	console.log(`🚀 BMNR API Service running on port ${port}`);
-	console.log(`📍 Health check: http://localhost:${port}/health`);
+	console.log(`📍 Health check: http://localhost:${port}/api/health`);
 	console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 });
 
