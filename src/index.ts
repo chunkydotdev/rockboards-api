@@ -41,6 +41,8 @@ const corsOptions = {
 			"https://www.sbet.rocks",
 			"https://btbt.rocks",
 			"https://www.btbt.rocks",
+			"https://ethz.rocks",
+			"https://www.ethz.rocks",
 			"http://localhost:3000",
 			"http://localhost:3001",
 		];
