@@ -240,6 +240,7 @@ router.get("/update", async (req: Request, res: Response) => {
 				
 				if (isCrypto) {
 					const cryptoPrice = cryptoPrices[ticker as keyof CryptoPrices];
+					const yahooTicker = ticker === "ETHUSD" ? "ETH-USD" : ticker === "BTCUSD" ? "BTC-USD" : ticker;
 					
 					if (!cryptoPrice) {
 						results.push({
@@ -255,7 +256,7 @@ router.get("/update", async (req: Request, res: Response) => {
 						.from("realtime_stock_prices")
 						.upsert(
 							{
-								ticker: ticker.toUpperCase(),
+								ticker: yahooTicker.toUpperCase(),
 								price: cryptoPrice,
 								currency: "USD",
 								regular_market_price: cryptoPrice,
