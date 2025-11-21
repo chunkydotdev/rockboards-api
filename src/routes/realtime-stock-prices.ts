@@ -141,6 +141,34 @@ function getYahooTicker(ticker: string): string {
 			: upperTicker;
 }
 
+// ===== TEMPORARY FIX: CoinGecko fallback for crypto =====
+// TODO: Remove this when Yahoo Finance API is back for ETHUSD/BTCUSD
+interface CoinGeckoPrice {
+	[key: string]: {
+		usd: number;
+	};
+}
+
+async function fetchCryptoPrice(ticker: string): Promise<number | null> {
+	try {
+		const coinId = ticker === "ETHUSD" ? "ethereum" : ticker === "BTCUSD" ? "bitcoin" : null;
+		if (!coinId) return null;
+
+		const response = await fetch(
+			`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`
+		);
+		
+		if (!response.ok) return null;
+		
+		const data = await response.json() as CoinGeckoPrice;
+		return data[coinId]?.usd || null;
+	} catch (error) {
+		console.error(`CoinGecko API error for ${ticker}:`, error);
+		return null;
+	}
+}
+// ===== END TEMPORARY FIX =====
+
 // Main function to fetch realtime stock price data
 async function fetchRealtimeStockPrice(
 	ticker: string,
@@ -196,6 +224,79 @@ router.get("/update", async (req: Request, res: Response) => {
 		// Update prices for each ticker
 		for (const ticker of tickers?.map((t) => t.ticker) || []) {
 			try {
+				// ===== TEMPORARY FIX: Use CoinGecko for crypto =====
+				// TODO: Remove this when Yahoo Finance API is back
+				const isCrypto = ticker === "ETHUSD" || ticker === "BTCUSD";
+				
+				if (isCrypto) {
+					const cryptoPrice = await fetchCryptoPrice(ticker);
+					
+					if (!cryptoPrice) {
+						results.push({
+							ticker,
+							success: false,
+							error: "CoinGecko API failed",
+						});
+						continue;
+					}
+
+					// Upsert with CoinGecko price, all Yahoo fields set to null/0
+					const { error: upsertError } = await supabaseServiceRole
+						.from("realtime_stock_prices")
+						.upsert(
+							{
+								ticker: ticker.toUpperCase(),
+								price: cryptoPrice,
+								currency: "USD",
+								regular_market_price: cryptoPrice,
+								regular_market_change: 0,
+								regular_market_change_percent: 0,
+								regular_market_time: new Date().toISOString(),
+								regular_market_previous_close: 0,
+								regular_market_open: 0,
+								regular_market_day_low: 0,
+								regular_market_day_high: 0,
+								regular_market_volume: 0,
+								market_state: "REGULAR",
+								exchange_name: "CRYPTO",
+								full_exchange_name: "Cryptocurrency",
+								display_name: ticker.toUpperCase(),
+								long_name: ticker === "ETHUSD" ? "Ethereum USD" : "Bitcoin USD",
+								pre_market_price: 0,
+								pre_market_change: 0,
+								pre_market_change_percent: 0,
+								pre_market_time: new Date().toISOString(),
+								post_market_price: 0,
+								post_market_change: 0,
+								post_market_change_percent: 0,
+								post_market_time: new Date().toISOString(),
+								last_updated: new Date().toISOString(),
+							},
+							{
+								onConflict: "ticker",
+							},
+						);
+
+					if (upsertError) {
+						results.push({
+							ticker,
+							success: false,
+							error: `Database update failed: ${upsertError.message}`,
+						});
+					} else {
+						results.push({
+							ticker,
+							success: true,
+							price: cryptoPrice,
+						});
+					}
+					
+					// Add a small delay to avoid rate limiting
+					await new Promise((resolve) => setTimeout(resolve, 100));
+					continue; // Skip Yahoo Finance logic
+				}
+				// ===== END TEMPORARY FIX =====
+
 				const yahooTicker =
 					ticker === "ETHUSD"
 						? "ETH-USD"
