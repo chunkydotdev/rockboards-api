@@ -149,22 +149,27 @@ interface CoinGeckoPrice {
 	};
 }
 
-async function fetchCryptoPrice(ticker: string): Promise<number | null> {
-	try {
-		const coinId = ticker === "ETHUSD" ? "ethereum" : ticker === "BTCUSD" ? "bitcoin" : null;
-		if (!coinId) return null;
+interface CryptoPrices {
+	ETHUSD?: number;
+	BTCUSD?: number;
+}
 
+async function fetchAllCryptoPrices(): Promise<CryptoPrices> {
+	try {
 		const response = await fetch(
-			`https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd`
+			`https://api.coingecko.com/api/v3/simple/price?ids=ethereum,bitcoin&vs_currencies=usd`
 		);
 		
-		if (!response.ok) return null;
+		if (!response.ok) return {};
 		
 		const data = await response.json() as CoinGeckoPrice;
-		return data[coinId]?.usd || null;
+		return {
+			ETHUSD: data.ethereum?.usd,
+			BTCUSD: data.bitcoin?.usd,
+		};
 	} catch (error) {
-		console.error(`CoinGecko API error for ${ticker}:`, error);
-		return null;
+		console.error(`CoinGecko API error:`, error);
+		return {};
 	}
 }
 // ===== END TEMPORARY FIX =====
@@ -221,6 +226,11 @@ router.get("/update", async (req: Request, res: Response) => {
 			error?: string;
 		}> = [];
 
+		// ===== TEMPORARY FIX: Fetch all crypto prices once =====
+		// TODO: Remove this when Yahoo Finance API is back
+		const cryptoPrices = await fetchAllCryptoPrices();
+		// ===== END TEMPORARY FIX =====
+
 		// Update prices for each ticker
 		for (const ticker of tickers?.map((t) => t.ticker) || []) {
 			try {
@@ -229,7 +239,7 @@ router.get("/update", async (req: Request, res: Response) => {
 				const isCrypto = ticker === "ETHUSD" || ticker === "BTCUSD";
 				
 				if (isCrypto) {
-					const cryptoPrice = await fetchCryptoPrice(ticker);
+					const cryptoPrice = cryptoPrices[ticker as keyof CryptoPrices];
 					
 					if (!cryptoPrice) {
 						results.push({
