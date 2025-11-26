@@ -143,7 +143,7 @@ function getYahooTicker(ticker: string): string {
 
 // ===== TEMPORARY FIX: CoinGecko fallback for crypto =====
 // TODO: Remove this when Yahoo Finance API is back for ETHUSD/BTCUSD
-interface CoinGeckoPrice {
+/**interface CoinGeckoPrice {
 	[key: string]: {
 		usd: number;
 	};
@@ -172,6 +172,7 @@ async function fetchAllCryptoPrices(): Promise<CryptoPrices> {
 		return {};
 	}
 }
+*/
 // ===== END TEMPORARY FIX =====
 
 // Main function to fetch realtime stock price data
@@ -228,7 +229,7 @@ router.get("/update", async (req: Request, res: Response) => {
 
 		// ===== TEMPORARY FIX: Fetch all crypto prices once =====
 		// TODO: Remove this when Yahoo Finance API is back
-		const cryptoPrices = await fetchAllCryptoPrices();
+		//const cryptoPrices = await fetchAllCryptoPrices();
 		// ===== END TEMPORARY FIX =====
 
 		// Update prices for each ticker
@@ -236,6 +237,7 @@ router.get("/update", async (req: Request, res: Response) => {
 			try {
 				// ===== TEMPORARY FIX: Use CoinGecko for crypto =====
 				// TODO: Remove this when Yahoo Finance API is back
+				/*
 				const isCrypto = ticker === "ETHUSD" || ticker === "BTCUSD";
 				
 				if (isCrypto) {
@@ -306,6 +308,7 @@ router.get("/update", async (req: Request, res: Response) => {
 					await new Promise((resolve) => setTimeout(resolve, 100));
 					continue; // Skip Yahoo Finance logic
 				}
+				*/
 				// ===== END TEMPORARY FIX =====
 
 				const yahooTicker =

@@ -110,7 +110,7 @@ export function createCacheMiddleware<T>(
 		// Check cache first
 		const cachedData = cache.get(req);
 
-		if (cachedData !== null) {
+		if (cachedData !== null && process.env.NODE_ENV !== "development") {
 			// Cache hit
 			const response: ApiResponse<T> = { data: cachedData };
 
