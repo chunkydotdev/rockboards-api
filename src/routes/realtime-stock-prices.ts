@@ -200,13 +200,36 @@ async function fetchRealtimeStockPrice(
 
 	// Fallback to Yahoo Finance if Supabase data is stale or missing
 	const yahooTicker = getYahooTicker(upperTicker);
-	const quote = (await yahooFinance.quote(yahooTicker)) as YahooQuoteResponse;
 
-	if (!quote) {
-		throw new Error(`No data found for ticker ${ticker}`);
+	try {
+		const quote = (await yahooFinance.quote(yahooTicker)) as YahooQuoteResponse;
+
+		if (!quote) {
+			throw new Error(`No data found for ticker ${ticker}`);
+		}
+
+		return convertYahooToRealtimePrice(quote, upperTicker);
+	} catch (yahooError) {
+		// Check if this is a rate limiting error from Yahoo Finance edge
+		const errorMessage = yahooError instanceof Error ? yahooError.message : String(yahooError);
+		const isRateLimitError = errorMessage.includes("Edge:") ||
+			errorMessage.includes("Too many") ||
+			errorMessage.includes("rate limit");
+
+		// If rate limited and we have stale Supabase data, use it instead of failing
+		if (isRateLimitError && supabaseData && !supabaseError) {
+			console.warn(`Yahoo Finance rate limited for ${ticker}, using stale Supabase data`);
+			return convertSupabaseToRealtimePrice(supabaseData, upperTicker);
+		}
+
+		// If rate limited but no fallback data available, throw a cleaner error
+		if (isRateLimitError) {
+			throw new Error(`Rate limited by data provider. Please try again later.`);
+		}
+
+		// Re-throw other errors
+		throw yahooError;
 	}
-
-	return convertYahooToRealtimePrice(quote, upperTicker);
 }
 
 // GET /api/stock-prices/realtime/update - Update realtime prices for all tickers (including alternative assets)
@@ -519,6 +542,11 @@ router.get("/cached/:ticker", async (req: Request, res: Response) => {
 					error: `Ticker ${req.params.ticker} not found`,
 				});
 			}
+			if (error.message.includes("Rate limited")) {
+				return res.status(429).json({
+					error: error.message,
+				});
+			}
 		}
 
 		res.status(500).json(handleDbError(error));
@@ -565,6 +593,11 @@ router.get("/:ticker", async (req: Request, res: Response) => {
 			) {
 				return res.status(404).json({
 					error: `Ticker ${req.params.ticker} not found`,
+				});
+			}
+			if (error.message.includes("Rate limited")) {
+				return res.status(429).json({
+					error: error.message,
 				});
 			}
 		}
