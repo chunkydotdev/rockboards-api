@@ -415,13 +415,37 @@ router.get("/update", async (req: Request, res: Response) => {
 					});
 				}
 
-				// Add a small delay to avoid rate limiting
-				await new Promise((resolve) => setTimeout(resolve, 100));
+				// Add a delay to avoid Yahoo Finance rate limiting (needs ~2 seconds between requests)
+				await new Promise((resolve) => setTimeout(resolve, 2000));
 			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : "Unknown error";
+				const isRateLimitError = errorMessage.includes("Too Many") ||
+					errorMessage.includes("rate limit") ||
+					errorMessage.includes("Edge:");
+
+				// If rate limited, try to use existing Supabase data instead of failing
+				if (isRateLimitError) {
+					const { data: existingData } = await supabaseServiceRole
+						.from("realtime_stock_prices")
+						.select("price")
+						.eq("ticker", ticker.toUpperCase())
+						.single();
+
+					if (existingData?.price) {
+						results.push({
+							ticker,
+							success: true,
+							price: existingData.price,
+						});
+						console.warn(`Yahoo Finance rate limited for ${ticker}, using cached price`);
+						continue;
+					}
+				}
+
 				results.push({
 					ticker,
 					success: false,
-					error: error instanceof Error ? error.message : "Unknown error",
+					error: errorMessage,
 				});
 			}
 		}
