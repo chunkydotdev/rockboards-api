@@ -7,6 +7,124 @@ import type {
 	RealtimeStockPrice,
 } from "../types";
 
+// Marketstack API configuration
+const MARKETSTACK_API_KEY = process.env.MARKETSTACK_API_KEY;
+const MARKETSTACK_BASE_URL = "https://api.marketstack.com/v2";
+
+// Marketstack API response type
+interface MarketstackStockPriceItem {
+	ticker: string;
+	exchange_code: string;
+	exchange_name: string;
+	country: string;
+	price: string; // API returns price as string
+	currency: string;
+	trade_last: string;
+}
+
+interface MarketstackApiResponse {
+	data: MarketstackStockPriceItem[];
+}
+
+interface MarketstackStockPriceResponse {
+	ticker: string;
+	exchange_name: string;
+	price: number;
+	currency: string;
+	trade_last: string;
+}
+
+// Preferred US exchanges in order of priority
+const US_EXCHANGES = ["NASDAQ", "NYSE", "NYSEARCA", "BATS", "AMEX"];
+
+// Helper to check if ticker is a crypto/currency
+function isCryptoTicker(ticker: string): boolean {
+	const upperTicker = ticker.toUpperCase();
+	return (
+		upperTicker === "ETHUSD" ||
+		upperTicker === "BTCUSD" ||
+		upperTicker.endsWith("-USD") ||
+		upperTicker.includes("BTC") ||
+		upperTicker.includes("ETH")
+	);
+}
+
+// Helper function to fetch stock price from Marketstack API (single ticker)
+async function fetchFromMarketstack(
+	ticker: string,
+): Promise<MarketstackStockPriceResponse | null> {
+	if (
+		!MARKETSTACK_API_KEY ||
+		MARKETSTACK_API_KEY === "your_marketstack_api_key_here"
+	) {
+		console.warn("Marketstack API key not configured");
+		return null;
+	}
+
+	try {
+		const url = new URL(`${MARKETSTACK_BASE_URL}/stockprice`);
+		url.searchParams.append("access_key", MARKETSTACK_API_KEY);
+		url.searchParams.append("ticker", ticker);
+
+		const response = await fetch(url.toString());
+		const responseText = await response.text();
+
+		if (!response.ok) {
+			console.error(
+				`Marketstack API error: ${response.status} ${response.statusText}`,
+			);
+			return null;
+		}
+
+		const apiResponse = JSON.parse(responseText) as MarketstackApiResponse;
+
+		if (!apiResponse?.data || apiResponse.data.length === 0) {
+			console.warn(`Marketstack: No data for ${ticker}`);
+			return null;
+		}
+
+		// Find US exchange data (prefer NASDAQ, then NYSE, etc.)
+		let stockData: MarketstackStockPriceItem | undefined;
+		for (const exchange of US_EXCHANGES) {
+			stockData = apiResponse.data.find(
+				(item) => item.exchange_code === exchange,
+			);
+			if (stockData) break;
+		}
+
+		// Fallback to first USD result if no US exchange found
+		if (!stockData) {
+			stockData = apiResponse.data.find((item) => item.currency === "USD");
+		}
+
+		// Last resort: use first result
+		if (!stockData) {
+			stockData = apiResponse.data[0];
+		}
+
+		const price = parseFloat(stockData.price);
+		if (Number.isNaN(price)) {
+			console.warn(`Marketstack: Invalid price for ${ticker}`);
+			return null;
+		}
+
+		console.log(
+			`Marketstack: ${ticker} -> ${price} USD (${stockData.exchange_name})`,
+		);
+
+		return {
+			ticker: stockData.ticker,
+			exchange_name: stockData.exchange_name,
+			price: price,
+			currency: stockData.currency,
+			trade_last: stockData.trade_last,
+		};
+	} catch (error) {
+		console.error(`Marketstack fetch error for ${ticker}:`, error);
+		return null;
+	}
+}
+
 // Extended type for Yahoo Finance quote response
 interface YahooQuoteResponse {
 	regularMarketPrice?: number;
@@ -141,265 +259,206 @@ function getYahooTicker(ticker: string): string {
 			: upperTicker;
 }
 
-// ===== TEMPORARY FIX: CoinGecko fallback for crypto =====
-// TODO: Remove this when Yahoo Finance API is back for ETHUSD/BTCUSD
-interface CoinGeckoPrice {
-	[key: string]: {
-		usd: number;
-	};
-}
-
-interface CryptoPrices {
-	ETHUSD?: number;
-	BTCUSD?: number;
-}
-
-async function fetchAllCryptoPrices(): Promise<CryptoPrices> {
-	try {
-		const response = await fetch(
-			`https://api.coingecko.com/api/v3/simple/price?ids=ethereum,bitcoin&vs_currencies=usd`
-		);
-
-		if (!response.ok) return {};
-
-		const data = await response.json() as CoinGeckoPrice;
-		return {
-			ETHUSD: data.ethereum?.usd,
-			BTCUSD: data.bitcoin?.usd,
-		};
-	} catch (error) {
-		console.error(`CoinGecko API error:`, error);
-		return {};
-	}
-}
-// ===== END TEMPORARY FIX =====
-
-// Main function to fetch realtime stock price data
+// Main function to fetch realtime stock price data (reads from Supabase only)
+// Yahoo Finance is only called by the /update endpoint to avoid rate limiting
 async function fetchRealtimeStockPrice(
 	ticker: string,
 ): Promise<RealtimeStockPrice> {
 	const upperTicker = ticker.toUpperCase();
+	const yahooTicker = getYahooTicker(upperTicker);
 
-	// First try to get data from Supabase (using public client with RLS)
+	// Get data from Supabase (using public client with RLS)
 	const { data: supabaseData, error: supabaseError } = await supabase
 		.from("realtime_stock_prices")
 		.select("*")
-		.eq("ticker", upperTicker)
+		.eq("ticker", yahooTicker.toUpperCase())
 		.single();
 
-	// Check if data is fresh (less than 2 minutes old)
-	const isDataFresh =
-		supabaseData &&
-		new Date().getTime() - new Date(supabaseData.last_updated).getTime() <
-			2 * 60 * 1000;
-
-	if (isDataFresh && !supabaseError) {
-		// Use Supabase data if fresh
-		return convertSupabaseToRealtimePrice(supabaseData, upperTicker);
+	if (supabaseError || !supabaseData) {
+		throw new Error(`No data found for ticker ${ticker}`);
 	}
 
-	// Fallback to Yahoo Finance if Supabase data is stale or missing
-	const yahooTicker = getYahooTicker(upperTicker);
-
-	try {
-		const quote = (await yahooFinance.quote(yahooTicker)) as YahooQuoteResponse;
-
-		if (!quote) {
-			throw new Error(`No data found for ticker ${ticker}`);
-		}
-
-		return convertYahooToRealtimePrice(quote, upperTicker);
-	} catch (yahooError) {
-		// Check if this is a rate limiting error from Yahoo Finance edge
-		const errorMessage = yahooError instanceof Error ? yahooError.message : String(yahooError);
-		const isRateLimitError = errorMessage.includes("Edge:") ||
-			errorMessage.includes("Too many") ||
-			errorMessage.includes("rate limit");
-
-		// If rate limited and we have stale Supabase data, use it instead of failing
-		if (isRateLimitError && supabaseData && !supabaseError) {
-			console.warn(`Yahoo Finance rate limited for ${ticker}, using stale Supabase data`);
-			return convertSupabaseToRealtimePrice(supabaseData, upperTicker);
-		}
-
-		// If rate limited but no fallback data available, throw a cleaner error
-		if (isRateLimitError) {
-			throw new Error(`Rate limited by data provider. Please try again later.`);
-		}
-
-		// Re-throw other errors
-		throw yahooError;
-	}
+	return convertSupabaseToRealtimePrice(supabaseData, upperTicker);
 }
 
 // GET /api/stock-prices/realtime/update - Update realtime prices for all tickers (including alternative assets)
+// Query params:
+//   - tickers: comma-separated list of specific tickers to update (e.g., "SBET,BMNR")
+//   - If not provided, updates all tickers from companies table
+// Example: /api/stock-prices/realtime/update?tickers=SBET,BMNR (priority tickers only)
 router.get("/update", async (req: Request, res: Response) => {
 	try {
-		// Get all unique tickers from companies table
-		const { data: tickers } = await supabaseServiceRole
-			.from("companies")
-			.select("ticker")
-			.not("ticker", "is", null)
-			.not("ticker", "eq", "");
+		let tickerList: string[];
+
+		// Check if specific tickers were requested
+		const requestedTickers = req.query.tickers as string | undefined;
+
+		if (requestedTickers) {
+			// Use specific tickers from query param
+			tickerList = requestedTickers
+				.split(",")
+				.map((t) => t.trim().toUpperCase());
+		} else {
+			// Get all unique tickers from companies table
+			const { data: tickers } = await supabaseServiceRole
+				.from("companies")
+				.select("ticker")
+				.not("ticker", "is", null)
+				.not("ticker", "eq", "");
+			tickerList = tickers?.map((t) => t.ticker) || [];
+		}
 
 		const results: Array<{
 			ticker: string;
 			success: boolean;
 			price?: number;
+			source?: string;
 			error?: string;
 		}> = [];
 
-		// ===== TEMPORARY FIX: Fetch all crypto prices once =====
-		// TODO: Remove this when Yahoo Finance API is back
-		const cryptoPrices = await fetchAllCryptoPrices();
-		// ===== END TEMPORARY FIX =====
+		// Process each ticker
+		for (const ticker of tickerList) {
+			const yahooTicker = getYahooTicker(ticker);
+			const isCrypto = isCryptoTicker(ticker);
 
-		// Update prices for each ticker
-		for (const ticker of tickers?.map((t) => t.ticker) || []) {
 			try {
-				// ===== TEMPORARY FIX: Use CoinGecko for crypto =====
-				// TODO: Remove this when Yahoo Finance API is back
-				const isCrypto = ticker === "ETHUSD" || ticker === "BTCUSD";
+				let price: number | null = null;
+				let currency = "USD";
+				let exchangeName = "";
+				let tradeTime: string | null = null;
+				let source: "marketstack" | "yahoo" = "marketstack";
 
-				if (isCrypto) {
-					const cryptoPrice = cryptoPrices[ticker as keyof CryptoPrices];
-					const yahooTicker = ticker === "ETHUSD" ? "ETH-USD" : ticker === "BTCUSD" ? "BTC-USD" : ticker;
-
-					if (!cryptoPrice) {
-						results.push({
-							ticker,
-							success: false,
-							error: "CoinGecko API failed",
-						});
-						continue;
+				// Try Marketstack first for non-crypto tickers
+				if (!isCrypto) {
+					const marketstackData = await fetchFromMarketstack(ticker);
+					if (marketstackData) {
+						price = marketstackData.price;
+						currency = marketstackData.currency || "USD";
+						exchangeName = marketstackData.exchange_name || "";
+						tradeTime = marketstackData.trade_last || null;
 					}
-
-					// Upsert with CoinGecko price, all Yahoo fields set to null/0
-					const { error: upsertError } = await supabaseServiceRole
-						.from("realtime_stock_prices")
-						.upsert(
-							{
-								ticker: yahooTicker.toUpperCase(),
-								price: cryptoPrice,
-								currency: "USD",
-								regular_market_price: cryptoPrice,
-								regular_market_change: 0,
-								regular_market_change_percent: 0,
-								regular_market_time: new Date().toISOString(),
-								regular_market_previous_close: 0,
-								regular_market_open: 0,
-								regular_market_day_low: 0,
-								regular_market_day_high: 0,
-								regular_market_volume: 0,
-								market_state: "REGULAR",
-								exchange_name: "CRYPTO",
-								full_exchange_name: "Cryptocurrency",
-								display_name: ticker.toUpperCase(),
-								long_name: ticker === "ETHUSD" ? "Ethereum USD" : "Bitcoin USD",
-								pre_market_price: 0,
-								pre_market_change: 0,
-								pre_market_change_percent: 0,
-								pre_market_time: new Date().toISOString(),
-								post_market_price: 0,
-								post_market_change: 0,
-								post_market_change_percent: 0,
-								post_market_time: new Date().toISOString(),
-								last_updated: new Date().toISOString(),
-							},
-							{
-								onConflict: "ticker",
-							},
-						);
-
-					if (upsertError) {
-						results.push({
-							ticker,
-							success: false,
-							error: `Database update failed: ${upsertError.message}`,
-						});
-					} else {
-						results.push({
-							ticker,
-							success: true,
-							price: cryptoPrice,
-						});
-					}
-
-					// Add a small delay to avoid rate limiting
-					await new Promise((resolve) => setTimeout(resolve, 100));
-					continue; // Skip Yahoo Finance logic
 				}
-				// ===== END TEMPORARY FIX =====
 
-				const yahooTicker =
-					ticker === "ETHUSD"
-						? "ETH-USD"
-						: ticker === "BTCUSD"
-							? "BTC-USD"
-							: ticker;
+				// Fall back to Yahoo Finance if Marketstack fails or for crypto
+				let quote: YahooQuoteResponse | null = null;
+				if (price === null) {
+					source = "yahoo";
+					console.log(`Using Yahoo Finance for ${ticker}`);
+					try {
+						quote = (await yahooFinance.quote(yahooTicker)) as YahooQuoteResponse;
 
-				// Fetch from Yahoo Finance
-				const quote = (await yahooFinance.quote(
-					yahooTicker,
-				)) as YahooQuoteResponse;
+						if (quote?.regularMarketPrice) {
+							price = quote.regularMarketPrice;
+							currency = quote.currency || "USD";
+							exchangeName = quote.exchange || "";
+						}
+					} catch (yahooError) {
+						const errorMsg = yahooError instanceof Error ? yahooError.message : String(yahooError);
+						const isRateLimit = errorMsg.toLowerCase().includes("too many") ||
+							errorMsg.toLowerCase().includes("rate limit") ||
+							errorMsg.includes("429");
+						if (isRateLimit) {
+							console.warn(`Yahoo Finance rate limited for ${ticker}, will try cached data`);
+						} else {
+							console.warn(`Yahoo Finance error for ${ticker}:`, errorMsg);
+						}
+					}
+				}
 
-				if (!quote || !quote.regularMarketPrice) {
+				// Fall back to latest price from stock_prices table (historical data)
+				if (price === null) {
+					console.log(`Using cached stock_prices for ${ticker}`);
+
+					// First get company_id from companies table
+					const { data: company } = await supabaseServiceRole
+						.from("companies")
+						.select("id")
+						.eq("ticker", ticker.toUpperCase())
+						.single();
+
+					if (company?.id) {
+						const { data: stockPriceData } = await supabaseServiceRole
+							.from("stock_prices")
+							.select("close, date")
+							.eq("company_id", company.id)
+							.order("date", { ascending: false })
+							.limit(1)
+							.single();
+
+						if (stockPriceData?.close) {
+							price = stockPriceData.close;
+							source = "cached" as "marketstack" | "yahoo";
+							console.log(`Using cached price ${price} from ${stockPriceData.date} for ${ticker}`);
+						}
+					}
+				}
+
+				if (price === null) {
 					results.push({
 						ticker,
 						success: false,
-						error: "No price data available",
+						error: "No price data available from any source",
 					});
 					continue;
 				}
 
-				// Upsert realtime stock price using service role to bypass RLS
+				// Build upsert data
+				const upsertData: Record<string, unknown> = {
+					ticker: yahooTicker.toUpperCase(),
+					price: price,
+					currency: currency,
+					regular_market_price: price,
+					exchange_name: exchangeName,
+					last_updated: new Date().toISOString(),
+				};
+
+				// If we have Yahoo quote data, include extended fields
+				if (quote) {
+					Object.assign(upsertData, {
+						regular_market_change: quote.regularMarketChange || 0,
+						regular_market_change_percent: quote.regularMarketChangePercent || 0,
+						regular_market_time:
+							quote.regularMarketTime && typeof quote.regularMarketTime === "number"
+								? new Date(quote.regularMarketTime * 1000).toISOString()
+								: new Date().toISOString(),
+						regular_market_previous_close: quote.regularMarketPreviousClose || 0,
+						regular_market_open: quote.regularMarketOpen || 0,
+						regular_market_day_low: quote.regularMarketDayLow || 0,
+						regular_market_day_high: quote.regularMarketDayHigh || 0,
+						regular_market_volume: quote.regularMarketVolume || 0,
+						market_state: quote.marketState || "UNKNOWN",
+						full_exchange_name: quote.fullExchangeName || "",
+						display_name: quote.displayName || ticker.toUpperCase(),
+						long_name: quote.longName || ticker.toUpperCase(),
+						pre_market_price: quote.preMarketPrice || 0,
+						pre_market_change: quote.preMarketChange || 0,
+						pre_market_change_percent: quote.preMarketChangePercent || 0,
+						pre_market_time:
+							quote.preMarketTime && typeof quote.preMarketTime === "number"
+								? new Date(quote.preMarketTime * 1000).toISOString()
+								: new Date().toISOString(),
+						post_market_price: quote.postMarketPrice || 0,
+						post_market_change: quote.postMarketChange || 0,
+						post_market_change_percent: quote.postMarketChangePercent || 0,
+						post_market_time:
+							quote.postMarketTime && typeof quote.postMarketTime === "number"
+								? new Date(quote.postMarketTime * 1000).toISOString()
+								: new Date().toISOString(),
+					});
+				} else {
+					// Set minimal fields when using Marketstack only
+					Object.assign(upsertData, {
+						regular_market_time: tradeTime || new Date().toISOString(),
+						market_state: "REGULAR",
+						display_name: ticker.toUpperCase(),
+						long_name: ticker.toUpperCase(),
+					});
+				}
+
+				// Upsert realtime stock price
 				const { error: upsertError } = await supabaseServiceRole
 					.from("realtime_stock_prices")
-					.upsert(
-						{
-							ticker: ticker.toUpperCase(),
-							price: quote.regularMarketPrice,
-							currency: quote.currency || "USD",
-							regular_market_price: quote.regularMarketPrice,
-							regular_market_change: quote.regularMarketChange || 0,
-							regular_market_change_percent:
-								quote.regularMarketChangePercent || 0,
-							regular_market_time:
-								quote.regularMarketTime &&
-								typeof quote.regularMarketTime === "number"
-									? new Date(quote.regularMarketTime * 1000).toISOString()
-									: new Date().toISOString(),
-							regular_market_previous_close:
-								quote.regularMarketPreviousClose || 0,
-							regular_market_open: quote.regularMarketOpen || 0,
-							regular_market_day_low: quote.regularMarketDayLow || 0,
-							regular_market_day_high: quote.regularMarketDayHigh || 0,
-							regular_market_volume: quote.regularMarketVolume || 0,
-							market_state: quote.marketState || "UNKNOWN",
-							exchange_name: quote.exchange || "",
-							full_exchange_name: quote.fullExchangeName || "",
-							display_name: quote.displayName || ticker.toUpperCase(),
-							long_name: quote.longName || ticker.toUpperCase(),
-							pre_market_price: quote.preMarketPrice || 0,
-							pre_market_change: quote.preMarketChange || 0,
-							pre_market_change_percent: quote.preMarketChangePercent || 0,
-							pre_market_time:
-								quote.preMarketTime && typeof quote.preMarketTime === "number"
-									? new Date(quote.preMarketTime * 1000).toISOString()
-									: new Date().toISOString(),
-							post_market_price: quote.postMarketPrice || 0,
-							post_market_change: quote.postMarketChange || 0,
-							post_market_change_percent: quote.postMarketChangePercent || 0,
-							post_market_time:
-								quote.postMarketTime && typeof quote.postMarketTime === "number"
-									? new Date(quote.postMarketTime * 1000).toISOString()
-									: new Date().toISOString(),
-							last_updated: new Date().toISOString(),
-						},
-						{
-							onConflict: "ticker",
-						},
-					);
+					.upsert(upsertData, { onConflict: "ticker" });
 
 				if (upsertError) {
 					results.push({
@@ -411,42 +470,46 @@ router.get("/update", async (req: Request, res: Response) => {
 					results.push({
 						ticker,
 						success: true,
-						price: quote.regularMarketPrice,
+						price: price,
+						source: source,
 					});
 				}
 
-				// Add a delay to avoid Yahoo Finance rate limiting (needs ~2 seconds between requests)
-				await new Promise((resolve) => setTimeout(resolve, 2000));
+				// Add delay for Yahoo rate limiting (Marketstack is paid, less restrictive)
+				if (source === "yahoo") {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error";
-				const isRateLimitError = errorMessage.includes("Too Many") ||
-					errorMessage.includes("rate limit") ||
-					errorMessage.includes("Edge:");
+				console.error(`Price fetch error for ${ticker}:`, errorMessage);
 
-				// If rate limited, try to use existing Supabase data instead of failing
-				if (isRateLimitError) {
-					const { data: existingData } = await supabaseServiceRole
+				// Try to use cached price on rate limit
+				const lowerError = errorMessage.toLowerCase();
+				if (
+					lowerError.includes("too many") ||
+					lowerError.includes("rate limit") ||
+					lowerError.includes("429") ||
+					lowerError.includes("is not valid json")
+				) {
+					const { data: cached } = await supabaseServiceRole
 						.from("realtime_stock_prices")
 						.select("price")
-						.eq("ticker", ticker.toUpperCase())
+						.eq("ticker", yahooTicker.toUpperCase())
 						.single();
 
-					if (existingData?.price) {
+					if (cached?.price) {
 						results.push({
 							ticker,
 							success: true,
-							price: existingData.price,
+							price: cached.price,
+							source: "cached",
 						});
-						console.warn(`Yahoo Finance rate limited for ${ticker}, using cached price`);
+						console.warn(`Rate limited for ${ticker}, using cached price`);
 						continue;
 					}
 				}
 
-				results.push({
-					ticker,
-					success: false,
-					error: errorMessage,
-				});
+				results.push({ ticker, success: false, error: errorMessage });
 			}
 		}
 

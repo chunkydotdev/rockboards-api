@@ -79,26 +79,16 @@ function differenceInDays(date1: Date, date2: Date): number {
 	return Math.ceil(timeDiff / (1000 * 3600 * 24));
 }
 
-// Helper function to fetch current ETH price from CoinGecko
+// Helper function to fetch current ETH price (reads from Supabase only)
 export async function getCurrentEthPrice(): Promise<number> {
 	try {
 		const { data: realtimePrice } = await supabaseServiceRole
 			.from("realtime_stock_prices")
 			.select("price")
-			.eq("ticker", "ETHUSD")
+			.eq("ticker", "ETH-USD")
 			.single();
 
-		const price = realtimePrice?.price;
-
-		if (price) {
-			return price;
-		}
-
-		const response = await fetch(
-			"https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
-		);
-		const data = (await response.json()) as { ethereum?: { usd?: number } };
-		return data.ethereum?.usd || 0;
+		return realtimePrice?.price || 0;
 	} catch (error) {
 		return 0;
 	}

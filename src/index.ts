@@ -1,6 +1,10 @@
 import cors from "cors";
 import express from "express";
+import yahooFinance from "yahoo-finance2";
 import { validateEnvironment } from "./lib/env-validation";
+
+// Suppress Yahoo Finance survey notice
+yahooFinance.suppressNotices(["yahooSurvey"]);
 import activityRouter from "./routes/activity";
 import alternativeAssetPricesRouter from "./routes/alternative-asset-prices";
 import alternativeAssetsRouter from "./routes/alternative-assets";
