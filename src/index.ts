@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import yahooFinance from "yahoo-finance2";
 import { validateEnvironment } from "./lib/env-validation";
+import { startFinnhubWebSocket, getFinnhubStatus } from "./services/finnhub-websocket";
 
 // Suppress Yahoo Finance survey notice
 yahooFinance.suppressNotices(["yahooSurvey"]);
@@ -107,6 +108,11 @@ app.get("/api/health", cors({ origin: "*", credentials: false }), (req, res) => 
 	});
 });
 
+// Finnhub WebSocket status endpoint
+app.get("/api/finnhub/status", cors({ origin: "*", credentials: false }), (req, res) => {
+	res.json(getFinnhubStatus());
+});
+
 app.get("/", (req, res) => {
 	res.json({
 		message: "BMNR API Service",
@@ -174,6 +180,9 @@ app.listen(port, () => {
 	console.log(`🚀 BMNR API Service running on port ${port}`);
 	console.log(`📍 Health check: http://localhost:${port}/api/health`);
 	console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
+
+	// Start Finnhub WebSocket for real-time price updates
+	startFinnhubWebSocket();
 });
 
 export default app;
