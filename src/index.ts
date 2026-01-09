@@ -181,8 +181,12 @@ app.listen(port, () => {
 	console.log(`📍 Health check: http://localhost:${port}/api/health`);
 	console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 
-	// Start Finnhub WebSocket for real-time price updates
-	startFinnhubWebSocket();
+	// Start Finnhub WebSocket for real-time price updates (production only)
+	if (process.env.NODE_ENV === "production") {
+		startFinnhubWebSocket();
+	} else {
+		console.log("📡 Finnhub WebSocket disabled in development mode");
+	}
 });
 
 export default app;

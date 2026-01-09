@@ -83,13 +83,11 @@ async function flushPrice(ticker: string): Promise<void> {
 					last_updated: new Date().toISOString(),
 					market_state: "REGULAR",
 				},
-				{ onConflict: "ticker" }
+				{ onConflict: "ticker" },
 			);
 
 		if (error) {
 			console.error(`[Finnhub WS] Failed to update ${ticker}:`, error.message);
-		} else {
-			console.log(`[Finnhub WS] Updated ${ticker}: $${price.toFixed(2)}`);
 		}
 	} catch (err) {
 		console.error(`[Finnhub WS] Error updating ${ticker}:`, err);
@@ -107,11 +105,6 @@ async function flushAllPendingPrices(): Promise<void> {
 function handleMessage(data: WebSocket.Data): void {
 	try {
 		const raw = data.toString();
-
-		// Don't log ping messages to reduce noise
-		if (!raw.includes('"type":"ping"')) {
-			console.log(`[Finnhub WS] Raw message: ${raw}`);
-		}
 
 		const message: FinnhubMessage = JSON.parse(raw);
 
@@ -145,13 +138,17 @@ function subscribe(socket: WebSocket): void {
 	// Subscribe to crypto symbols
 	for (const crypto of CRYPTO_SYMBOLS) {
 		socket.send(JSON.stringify({ type: "subscribe", symbol: crypto.finnhub }));
-		console.log(`[Finnhub WS] Subscribed to ${crypto.finnhub} -> ${crypto.ticker}`);
+		console.log(
+			`[Finnhub WS] Subscribed to ${crypto.finnhub} -> ${crypto.ticker}`,
+		);
 	}
 }
 
 function connect(): void {
 	if (!FINNHUB_API_KEY) {
-		console.error("[Finnhub WS] FINNHUB_API_KEY not set, skipping WebSocket connection");
+		console.error(
+			"[Finnhub WS] FINNHUB_API_KEY not set, skipping WebSocket connection",
+		);
 		return;
 	}
 
@@ -168,7 +165,9 @@ function connect(): void {
 	ws.on("message", handleMessage);
 
 	ws.on("close", (code, reason) => {
-		console.log(`[Finnhub WS] Disconnected (code: ${code}, reason: ${reason.toString()})`);
+		console.log(
+			`[Finnhub WS] Disconnected (code: ${code}, reason: ${reason.toString()})`,
+		);
 		ws = null;
 		scheduleReconnect();
 	});
@@ -184,10 +183,12 @@ function scheduleReconnect(): void {
 		return;
 	}
 
-	const delay = RECONNECT_BASE_DELAY_MS * Math.pow(2, reconnectAttempts);
+	const delay = RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts;
 	reconnectAttempts++;
 
-	console.log(`[Finnhub WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
+	console.log(
+		`[Finnhub WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`,
+	);
 
 	setTimeout(() => {
 		connect();
@@ -200,7 +201,9 @@ let flushInterval: NodeJS.Timeout | null = null;
 export function startFinnhubWebSocket(): void {
 	console.log("[Finnhub WS] Starting Finnhub WebSocket service...");
 	console.log(`[Finnhub WS] Stocks: ${STOCK_SYMBOLS.join(", ")}`);
-	console.log(`[Finnhub WS] Crypto: ${CRYPTO_SYMBOLS.map((c) => c.ticker).join(", ")}`);
+	console.log(
+		`[Finnhub WS] Crypto: ${CRYPTO_SYMBOLS.map((c) => c.ticker).join(", ")}`,
+	);
 
 	connect();
 
