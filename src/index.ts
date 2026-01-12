@@ -2,7 +2,9 @@ import cors from "cors";
 import express from "express";
 import yahooFinance from "yahoo-finance2";
 import { validateEnvironment } from "./lib/env-validation";
-import { startFinnhubWebSocket, getFinnhubStatus } from "./services/finnhub-websocket";
+// PAUSED: Finnhub WebSocket - keeping for potential rollback
+// import { startFinnhubWebSocket, getFinnhubStatus } from "./services/finnhub-websocket";
+import { startFinazonWebSocket, getFinazonStatus } from "./services/finazon-websocket";
 
 // Suppress Yahoo Finance survey notice
 yahooFinance.suppressNotices(["yahooSurvey"]);
@@ -108,9 +110,9 @@ app.get("/api/health", cors({ origin: "*", credentials: false }), (req, res) => 
 	});
 });
 
-// Finnhub WebSocket status endpoint
-app.get("/api/finnhub/status", cors({ origin: "*", credentials: false }), (req, res) => {
-	res.json(getFinnhubStatus());
+// Finazon WebSocket status endpoint
+app.get("/api/finazon/status", cors({ origin: "*", credentials: false }), (req, res) => {
+	res.json(getFinazonStatus());
 });
 
 app.get("/", (req, res) => {
@@ -181,11 +183,15 @@ app.listen(port, () => {
 	console.log(`📍 Health check: http://localhost:${port}/api/health`);
 	console.log(`🌍 Environment: ${process.env.NODE_ENV || "development"}`);
 
-	// Start Finnhub WebSocket for real-time price updates (production only)
+	// Start Finazon WebSocket for real-time price updates (production only)
+	// PAUSED: Finnhub WebSocket - uncomment to rollback
+	// if (process.env.NODE_ENV === "production") {
+	// 	startFinnhubWebSocket();
+	// }
 	if (process.env.NODE_ENV === "production") {
-		startFinnhubWebSocket();
+		startFinazonWebSocket();
 	} else {
-		console.log("📡 Finnhub WebSocket disabled in development mode");
+		console.log("📡 Finazon WebSocket disabled in development mode");
 	}
 });
 
